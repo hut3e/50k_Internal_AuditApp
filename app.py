@@ -102,7 +102,7 @@ def display_logos():
                 st.error(f"Lỗi khi hiển thị logo {logo_path}: {e}")
         
         # Hiển thị tiêu đề ứng dụng ở giữa
-        st.title("ISO 50001:2018 INTERNAL AUDIT TRANING COURSE - APP")
+        st.title("ISO 50001:2018 INTERNAL AUDIT TRANING COURSE")
     
     # Phần tải lên logo mới - ẩn trong expander để không chiếm nhiều không gian
     with st.expander("Cấu hình logo"):
