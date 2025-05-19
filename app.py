@@ -102,7 +102,7 @@ def display_logos():
                 st.error(f"Lỗi khi hiển thị logo {logo_path}: {e}")
         
         # Hiển thị tiêu đề ứng dụng ở giữa
-        st.title("COURSE-APP")
+        st.title("TUV NORD ISO 50001:2018 INTERNAL AUDIT TRANING COURSE - APP")
     
     # Phần tải lên logo mới - ẩn trong expander để không chiếm nhiều không gian
     with st.expander("Cấu hình logo"):
@@ -145,7 +145,7 @@ def display_logos():
 
 def main():
     st.set_page_config(
-        page_title="Hệ thống kiểm tra",
+        page_title="Hệ thống kiểm tra sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -172,7 +172,7 @@ def main():
     
     # Sidebar - Menu điều hướng
     with st.sidebar:
-        st.title("📝 Hệ thống kiểm tra")
+        st.title("📝 Hệ thống kiểm tra sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018")
         st.success("Đã kết nối thành công đến Supabase!")
         
         # Hiển thị thông tin dự án (ẩn key)
@@ -282,7 +282,7 @@ def main():
         
         # Đã đăng nhập - Hiển thị menu tương ứng
         else:
-            st.write(f"Chào mừng bạn tham dự, **{st.session_state.user_info['full_name']}**!")
+            st.write(f"Chào mừng bạn tham dự Khóa Đào tạo Đánh giá viên nội bộ ISO 50001:2018, **{st.session_state.user_info['full_name']}**!")
             
             # Menu cho quản trị viên
             if st.session_state.user_role == "admin":
@@ -324,7 +324,7 @@ def main():
                 )
     else:
         # Màn hình chào mừng
-        st.header("Chào mừng các bạn học viên!")
+        st.header("Chào mừng các bạn học viên tham gia Khóa đào tạo Đánh giá viên nội bộ ISO 50001:2018!")
         
         st.markdown("""
         ### Tính năng chính:
@@ -343,9 +343,9 @@ def main():
         """)
         
         # Hiển thị một số thông tin demo
-        with st.expander("Thông tin App"):
+        with st.expander("Thông tin App Kiểm tra Khóa Đánh giá viên nội bộ ISO 50001:2018"):
             st.write("""
-            **Đây là phiên bản App Ver 1.0**
+            **Đây là phiên bản App Ver 1.0 phát triển bởi Team ISO 50001**
             
             - Nếu bạn đã có tài khoản, vui lòng đăng nhập.
             - Nếu chưa có tài khoản, vui lòng đăng ký để sử dụng hệ thống.
@@ -400,7 +400,7 @@ def setup_environment_variables():
 
 def admin_dashboard():
     """Hiển thị bảng điều khiển quản trị"""
-    st.title("⚙️ Quản trị hệ thống")
+    st.title("⚙️ Quản trị hệ thống kiểm tra")
     
     # Tạo các tab quản trị
     tab1, tab2, tab3 = st.tabs(["Quản lý người dùng", "Cài đặt hệ thống", "Xuất dữ liệu"])
