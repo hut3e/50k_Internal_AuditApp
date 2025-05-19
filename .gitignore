@@ -1,0 +1,42 @@
+# Ignore environment and configuration files
+.env
+.env.local
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore virtual environments
+venv/
+env/
+ENV/
+
+# Ignore Streamlit specific files
+.streamlit/secrets.toml
+
+# Ignore database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Ignore logs
+*.log
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore distribution files
+dist/
+build/
+*.egg-info/
