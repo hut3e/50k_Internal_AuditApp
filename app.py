@@ -351,7 +351,7 @@ def main():
             - Nếu chưa có tài khoản, vui lòng đăng ký để sử dụng hệ thống.
             - Trong quá trình đăng nhập, bạn có thể chọn đăng nhập với vai trò Học viên hoặc Quản trị viên.
             
-            Chú ý: Đối với tài khoản demo, không yêu cầu mật khẩu thực. Tính năng này chỉ để thử nghiệm.
+            Chú ý: Đối với tài khoản đăng ký làm bài, không yêu cầu mật khẩu thực. Tính năng này chỉ để kiểm tra học viên.
             Nếu sử dụng tài khoản thực, hệ thống sẽ kiểm tra thông tin đăng nhập với cơ sở dữ liệu Supabase.
             """)
 
