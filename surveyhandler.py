@@ -94,6 +94,9 @@ def survey_form(email, full_name, class_name):
             # Lưu trữ câu trả lời tạm thời
             responses = {}
             
+            # Đếm số câu hỏi tự luận để thống kê
+            essay_count = 0
+            
             for q in questions:
                 q_id = q["id"]
                 st.markdown(f"**Câu {q_id}: {q['question']}** *(Điểm: {q['score']})*")
@@ -111,8 +114,42 @@ def survey_form(email, full_name, class_name):
                         key=f"q_{q_id}"
                     )
                     responses[str(q_id)] = [selected] if selected else []
+                elif q["type"] == "Essay":
+                    # Đếm số câu hỏi tự luận
+                    essay_count += 1
+                    
+                    # Hiển thị mẫu câu trả lời nếu có
+                    if q.get("answer_template"):
+                        st.info(f"**Gợi ý:** {q.get('answer_template')}")
+                    
+                    # Cải thiện hiển thị textarea để học viên nhập câu trả lời
+                    st.write("**Nhập câu trả lời của bạn:**")
+                    essay_answer = st.text_area(
+                        "Câu trả lời",
+                        height=150,
+                        key=f"q_{q_id}",
+                        help="Nhập câu trả lời của bạn vào đây. Câu trả lời sẽ được chấm điểm thủ công bởi giáo viên."
+                    )
+                    
+                    # Lưu vào responses
+                    responses[str(q_id)] = [essay_answer] if essay_answer else []
+                    
+                    # Hiển thị lưu ý cho câu hỏi tự luận
+                    if essay_answer:
+                        st.success("Đã nhập câu trả lời")
+                    else:
+                        st.warning("Vui lòng nhập câu trả lời")
                 
                 st.divider()
+            
+            # Hiển thị lưu ý về câu hỏi tự luận nếu có
+            if essay_count > 0:
+                st.info(f"""
+                **Lưu ý:**
+                - Bài làm của bạn có **{essay_count}** câu hỏi tự luận.
+                - Các câu hỏi tự luận sẽ được chấm điểm thủ công bởi giáo viên.
+                - Điểm số cuối cùng có thể thay đổi sau khi giáo viên chấm điểm câu hỏi tự luận.
+                """)
             
             # Nút gửi đáp án (trong form)
             submit_button = st.form_submit_button(label="📨 Gửi đáp án", use_container_width=True)
@@ -124,15 +161,28 @@ def survey_form(email, full_name, class_name):
                     st.error("Bạn đã sử dụng hết số lần làm bài cho phép!")
                     st.session_state.submission_result = None
                 else:
-                    # Lưu câu trả lời vào database với ID duy nhất
-                    result = save_submission(email, responses)
+                    # Kiểm tra xem có câu tự luận nào chưa trả lời không
+                    missing_essay = False
+                    for q in questions:
+                        if q["type"] == "Essay":
+                            q_id = str(q["id"])
+                            essay_ans = responses.get(q_id, [])
+                            if not essay_ans or not essay_ans[0].strip():
+                                missing_essay = True
+                                break
                     
-                    if result:
-                        st.session_state.submission_result = result
-                        st.session_state.max_score = max_score
-                        st.rerun()  # Làm mới trang để hiển thị kết quả
+                    if missing_essay:
+                        st.error("Vui lòng trả lời tất cả các câu hỏi tự luận trước khi nộp bài!")
                     else:
-                        st.error("❌ Có lỗi xảy ra khi gửi đáp án, vui lòng thử lại!")
+                        # Lưu câu trả lời vào database với ID duy nhất
+                        result = save_submission(email, responses)
+                        
+                        if result:
+                            st.session_state.submission_result = result
+                            st.session_state.max_score = max_score
+                            st.rerun()  # Làm mới trang để hiển thị kết quả
+                        else:
+                            st.error("❌ Có lỗi xảy ra khi gửi đáp án, vui lòng thử lại!")
     
     # Hiển thị kết quả sau khi nộp bài
     else:
@@ -158,13 +208,18 @@ def survey_form(email, full_name, class_name):
             st.warning("⚠️ Bạn đã sử dụng hết số lần làm bài cho phép.")
 
 def check_answer_correctness(student_answers, question):
-    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án."""
+    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án và câu hỏi tự luận."""
     # Nếu câu trả lời trống, không đúng
     if not student_answers:
         return False
         
+    # Đối với câu hỏi tự luận (Essay), luôn đánh giá dựa trên việc có nhập câu trả lời hay không
+    if question["type"] == "Essay":
+        # Chỉ cần học viên nhập nội dung vào ô text là tính đúng (điểm sẽ được chấm thủ công sau)
+        return len(student_answers) > 0 and student_answers[0].strip() != ""
+        
     # Đối với câu hỏi combobox (chỉ chọn một)
-    if question["type"] == "Combobox":
+    elif question["type"] == "Combobox":
         # Nếu có một đáp án và đáp án đó ở vị trí nằm trong danh sách đáp án đúng
         if len(student_answers) == 1:
             answer_text = student_answers[0]
@@ -224,6 +279,19 @@ def display_submission_details(submission, questions, max_score):
         correct_count = sum(1 for q in questions if check_correct_for_report(submission, q))
         incorrect_count = len(questions) - correct_count
         
+        # Kiểm tra số câu hỏi tự luận
+        essay_questions = [q for q in questions if q.get("type") == "Essay"]
+        essay_count = len(essay_questions)
+        
+        if essay_count > 0:
+            st.info(f"""
+            **Lưu ý về câu hỏi tự luận:**
+            - Bài làm của bạn có {essay_count} câu hỏi tự luận.
+            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm thủ công.
+            - Điểm số hiện tại có thể chưa bao gồm điểm của các câu hỏi tự luận.
+            - Vui lòng kiểm tra lại sau.
+            """)
+        
         # Hiển thị dạng biểu đồ đơn giản
         st.subheader("Thống kê kết quả")
         
@@ -237,6 +305,28 @@ def display_submission_details(submission, questions, max_score):
     
     with tab_details:
         st.subheader("Chi tiết câu trả lời")
+        
+        # Lấy điểm câu hỏi tự luận (nếu có)
+        essay_grades = {}
+        if "essay_grades" in submission:
+            if isinstance(submission["essay_grades"], str):
+                try:
+                    essay_grades = json.loads(submission["essay_grades"])
+                except:
+                    essay_grades = {}
+            else:
+                essay_grades = submission.get("essay_grades", {})
+                
+        # Lấy nhận xét câu hỏi tự luận (nếu có)
+        essay_comments = {}
+        if "essay_comments" in submission:
+            if isinstance(submission["essay_comments"], str):
+                try:
+                    essay_comments = json.loads(submission["essay_comments"])
+                except:
+                    essay_comments = {}
+            else:
+                essay_comments = submission.get("essay_comments", {})
         
         # Hiển thị chi tiết từng câu hỏi
         for q in questions:
@@ -259,26 +349,45 @@ def display_submission_details(submission, questions, max_score):
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Đáp án đúng
-                expected_indices = q["correct"]
-                expected_answers = [q["answers"][i - 1] for i in expected_indices]
-                
-                # Hiển thị đáp án người dùng đã chọn
-                st.write("Đáp án đã chọn:")
-                if not student_answers:
-                    st.write("- Không trả lời")
+                # Hiển thị khác nhau dựa trên loại câu hỏi
+                if q["type"] == "Essay":
+                    # Hiển thị câu trả lời tự luận
+                    st.write("Câu trả lời của bạn:")
+                    essay_answer = student_answers[0] if student_answers else "Không có câu trả lời"
+                    st.text_area("", value=essay_answer, height=100, disabled=True,
+                                key=f"display_essay_{q_id}")
+                    
+                    # Đối với câu hỏi tự luận, hiển thị trạng thái chấm điểm
+                    if q_id in essay_grades:
+                        st.success(f"✅ Đã được chấm điểm: {essay_grades[q_id]}/{q['score']} điểm")
+                        
+                        # Hiển thị nhận xét nếu có
+                        if q_id in essay_comments and essay_comments[q_id]:
+                            st.info(f"**Nhận xét:** {essay_comments[q_id]}")
+                    else:
+                        st.warning("⏳ Chưa được chấm điểm - Vui lòng kiểm tra lại sau")
                 else:
-                    for ans in student_answers:
-                        st.write(f"- {ans}")
-                
-                # Hiển thị kết quả
-                if is_correct:
-                    st.success(f"✅ Đúng (+{q['score']} điểm)")
-                else:
-                    st.error("❌ Sai (0 điểm)")
-                    st.write("Đáp án đúng:")
-                    for ans in expected_answers:
-                        st.write(f"- {ans}")
+                    # Đối với câu hỏi trắc nghiệm, hiển thị các đáp án
+                    # Đáp án đúng
+                    expected_indices = q["correct"]
+                    expected_answers = [q["answers"][i - 1] for i in expected_indices]
+                    
+                    # Hiển thị đáp án người dùng đã chọn
+                    st.write("Đáp án đã chọn:")
+                    if not student_answers:
+                        st.write("- Không trả lời")
+                    else:
+                        for ans in student_answers:
+                            st.write(f"- {ans}")
+                    
+                    # Hiển thị kết quả
+                    if is_correct:
+                        st.success(f"✅ Đúng (+{q['score']} điểm)")
+                    else:
+                        st.error("❌ Sai (0 điểm)")
+                        st.write("Đáp án đúng:")
+                        for ans in expected_answers:
+                            st.write(f"- {ans}")
                 
                 st.divider()
 
@@ -356,6 +465,28 @@ def display_submission_history(submissions, questions, max_score):
             st.progress(correct_count / len(questions))
             st.caption(f"Tỷ lệ câu trả lời đúng: {(correct_count / len(questions) * 100):.1f}%")
             
+            # Lấy điểm câu hỏi tự luận (nếu có)
+            essay_grades = {}
+            if "essay_grades" in s:
+                if isinstance(s["essay_grades"], str):
+                    try:
+                        essay_grades = json.loads(s["essay_grades"])
+                    except:
+                        essay_grades = {}
+                else:
+                    essay_grades = s.get("essay_grades", {})
+                    
+            # Lấy nhận xét câu hỏi tự luận (nếu có)
+            essay_comments = {}
+            if "essay_comments" in s:
+                if isinstance(s["essay_comments"], str):
+                    try:
+                        essay_comments = json.loads(s["essay_comments"])
+                    except:
+                        essay_comments = {}
+                else:
+                    essay_comments = s.get("essay_comments", {})
+            
             # Hiển thị chi tiết từng câu hỏi
             for q in questions:
                 q_id = str(q["id"])
@@ -368,22 +499,41 @@ def display_submission_history(submissions, questions, max_score):
                 
                 # Hiển thị đáp án người dùng đã chọn
                 st.write(f"**Câu {q['id']}: {q['question']}**")
-                st.write("Đáp án đã chọn:")
-                if not student_answers:
-                    st.write("- Không trả lời")
-                else:
-                    for ans in student_answers:
-                        st.write(f"- {ans}")
                 
-                # Hiển thị kết quả
-                if is_correct:
-                    st.success(f"✅ Đúng (+{q['score']} điểm)")
+                if q["type"] == "Essay":
+                    # Hiển thị câu trả lời tự luận
+                    st.write("Câu trả lời của bạn:")
+                    essay_answer = student_answers[0] if student_answers else "Không có câu trả lời"
+                    st.text_area("", value=essay_answer, height=100, disabled=True,
+                                key=f"history_essay_{q_id}_{idx}")
+                    
+                    # Hiển thị kết quả chấm điểm nếu có
+                    if q_id in essay_grades:
+                        st.success(f"✅ Đã được chấm điểm: {essay_grades[q_id]}/{q['score']} điểm")
+                        
+                        # Hiển thị nhận xét nếu có
+                        if q_id in essay_comments and essay_comments[q_id]:
+                            st.info(f"**Nhận xét:** {essay_comments[q_id]}")
+                    else:
+                        st.warning("⏳ Chưa được chấm điểm")
                 else:
-                    st.error("❌ Sai (0 điểm)")
-                    expected_indices = q["correct"]
-                    expected_answers = [q["answers"][i - 1] for i in expected_indices]
-                    st.write("Đáp án đúng:")
-                    for ans in expected_answers:
-                        st.write(f"- {ans}")
+                    # Hiển thị đáp án của câu hỏi trắc nghiệm
+                    st.write("Đáp án đã chọn:")
+                    if not student_answers:
+                        st.write("- Không trả lời")
+                    else:
+                        for ans in student_answers:
+                            st.write(f"- {ans}")
+                    
+                    # Hiển thị kết quả
+                    if is_correct:
+                        st.success(f"✅ Đúng (+{q.get('score', 0)} điểm)")
+                    else:
+                        st.error("❌ Sai (0 điểm)")
+                        expected_indices = q["correct"]
+                        expected_answers = [q["answers"][i - 1] for i in expected_indices]
+                        st.write("Đáp án đúng:")
+                        for ans in expected_answers:
+                            st.write(f"- {ans}")
                 
                 st.divider()
