@@ -533,8 +533,11 @@ def dataframe_to_pdf_fpdf(df, title, filename):
     
     buffer.seek(0)
     return buffer
+
+# Bổ sung vào file report.py
+
 def create_student_report_docx(student_name, student_email, student_class, submission, questions, max_possible):
-    """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX"""
+    """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX, bao gồm câu tự luận"""
     try:
         doc = Document()
         
@@ -606,6 +609,28 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         cells[0].text = "Thời gian nộp"
         cells[1].text = submission_time
         
+        # Lấy điểm câu hỏi tự luận (nếu có)
+        essay_grades = {}
+        if "essay_grades" in submission:
+            if isinstance(submission["essay_grades"], str):
+                try:
+                    essay_grades = json.loads(submission["essay_grades"])
+                except:
+                    essay_grades = {}
+            else:
+                essay_grades = submission.get("essay_grades", {})
+                
+        # Lấy nhận xét câu hỏi tự luận (nếu có)
+        essay_comments = {}
+        if "essay_comments" in submission:
+            if isinstance(submission["essay_comments"], str):
+                try:
+                    essay_comments = json.loads(submission["essay_comments"])
+                except:
+                    essay_comments = {}
+            else:
+                essay_comments = submission.get("essay_comments", {})
+        
         # Tính toán thông tin về bài làm
         total_correct = 0
         total_questions = len(questions)
@@ -624,7 +649,7 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         
         # Thêm tiêu đề cho bảng với định dạng rõ ràng
         header_cells = answers_table.rows[0].cells
-        headers = ["Câu hỏi", "Đáp án của học viên", "Đáp án đúng", "Kết quả", "Điểm"]
+        headers = ["Câu hỏi", "Đáp án của học viên", "Đáp án đúng/Nhận xét", "Kết quả", "Điểm"]
         
         # Tạo nền xám cho hàng tiêu đề
         for i, cell in enumerate(header_cells):
@@ -657,13 +682,8 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             
             # Kiểm tra đúng/sai
             is_correct = check_answer_correctness(user_ans, q)
-            if is_correct:
+            if is_correct and q.get("type") != "Essay":  # Câu tự luận đúng nhưng điểm cần được chấm riêng
                 total_correct += 1
-                result = "Đúng"
-                points = q.get("score", 0)
-            else:
-                result = "Sai"
-                points = 0
             
             # Thêm hàng mới vào bảng
             row_cells = answers_table.add_row().cells
@@ -677,12 +697,28 @@ def create_student_report_docx(student_name, student_email, student_class, submi
                 essay_answer = user_ans[0] if user_ans else "Không trả lời"
                 row_cells[1].text = essay_answer
                 
-                # Đối với câu hỏi tự luận, không có đáp án đúng
-                row_cells[2].text = "Câu hỏi tự luận"
+                # Hiển thị nhận xét giáo viên nếu có
+                essay_comment = essay_comments.get(q_id, "Chưa có nhận xét")
+                row_cells[2].text = essay_comment
                 
-                # Kết quả dựa trên việc học viên có trả lời hay không
-                result = "Đã trả lời" if is_correct else "Không trả lời"
+                # Điểm câu hỏi tự luận
+                essay_score = essay_grades.get(q_id, 0)
+                
+                # Kết quả dựa trên việc học viên có trả lời hay không và đã chấm điểm chưa
+                if is_correct:
+                    if q_id in essay_grades:
+                        result = "Đã chấm điểm"
+                        points = essay_score
+                    else:
+                        result = "Chưa chấm điểm"
+                        points = 0
+                else:
+                    result = "Không trả lời"
+                    points = 0
+                
                 row_cells[3].text = result
+                row_cells[4].text = str(points)
+                
             else:
                 # Đối với câu hỏi trắc nghiệm
                 row_cells[1].text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
@@ -712,22 +748,26 @@ def create_student_report_docx(student_name, student_email, student_class, submi
                     expected = ["Lỗi đáp án"]
                 
                 row_cells[2].text = ", ".join([str(a) for a in expected])
-                row_cells[3].text = result
+                row_cells[3].text = "Đúng" if is_correct else "Sai"
+                row_cells[4].text = str(q.get("score", 0) if is_correct else 0)
             
             # Đặt màu cho kết quả
             for paragraph in row_cells[3].paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 if not paragraph.runs:
-                    paragraph.add_run(result)
+                    paragraph.add_run(row_cells[3].text)
                 run = paragraph.runs[0]
-                if is_correct:
+                if "Đúng" in row_cells[3].text or "Đã chấm điểm" in row_cells[3].text:
                     run.font.color.rgb = RGBColor(0, 128, 0)  # Màu xanh lá cho đúng
                     run.bold = True
-                else:
+                elif "Sai" in row_cells[3].text or "Không trả lời" in row_cells[3].text:
                     run.font.color.rgb = RGBColor(255, 0, 0)  # Màu đỏ cho sai
                     run.bold = True
+                else:  # Trường hợp "Chưa chấm điểm"
+                    run.font.color.rgb = RGBColor(255, 140, 0)  # Màu cam
+                    run.bold = True
             
-            row_cells[4].text = str(points)
+            # Căn giữa cột điểm
             row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Thêm tổng kết với định dạng rõ ràng
@@ -782,6 +822,314 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         buffer = io.BytesIO()
         buffer.seek(0)
         return buffer
+
+def create_student_report_pdf_fpdf(student_name, student_email, student_class, submission, questions, max_possible):
+    """Tạo báo cáo chi tiết bài làm của học viên dạng PDF sử dụng FPDF2 với hỗ trợ Unicode, bao gồm câu tự luận"""
+    buffer = io.BytesIO()
+    
+    try:
+        # Tạo PDF mới với hỗ trợ Unicode
+        title = f"Báo cáo chi tiết - {student_name}"
+        pdf = create_unicode_pdf(title=title)
+        
+        if pdf is None:
+            raise Exception("Không thể tạo đối tượng PDF")
+        
+        pdf.add_page()
+        
+        # Thiết lập font cho tiêu đề
+        pdf.set_font('DejaVu', 'B', 16)
+        pdf.cell(0, 10, title, 0, 1, 'C')
+        
+        # Thêm thời gian báo cáo
+        pdf.set_font('DejaVu', 'I', 10)
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        pdf.ln(5)
+        
+        # Tính toán thông tin về bài làm
+        total_correct = 0
+        total_questions = len(questions)
+        
+        # Đảm bảo responses đúng định dạng
+        responses = submission.get("responses", {})
+        if isinstance(responses, str):
+            try:
+                responses = json.loads(responses)
+            except:
+                responses = {}
+                
+        # Lấy điểm câu hỏi tự luận (nếu có)
+        essay_grades = {}
+        if "essay_grades" in submission:
+            if isinstance(submission["essay_grades"], str):
+                try:
+                    essay_grades = json.loads(submission["essay_grades"])
+                except:
+                    essay_grades = {}
+            else:
+                essay_grades = submission.get("essay_grades", {})
+                
+        # Lấy nhận xét câu hỏi tự luận (nếu có)
+        essay_comments = {}
+        if "essay_comments" in submission:
+            if isinstance(submission["essay_comments"], str):
+                try:
+                    essay_comments = json.loads(submission["essay_comments"])
+                except:
+                    essay_comments = {}
+            else:
+                essay_comments = submission.get("essay_comments", {})
+        
+        # Xử lý timestamp
+        submission_time = "Không xác định"
+        if isinstance(submission.get("timestamp"), (int, float)):
+            try:
+                submission_time = datetime.fromtimestamp(submission.get("timestamp")).strftime("%H:%M:%S %d/%m/%Y")
+            except:
+                pass
+        else:
+            try:
+                dt = datetime.fromisoformat(submission.get("timestamp", "").replace("Z", "+00:00"))
+                submission_time = dt.strftime("%H:%M:%S %d/%m/%Y")
+            except:
+                pass
+        
+        # Thông tin học viên
+        pdf.set_font('DejaVu', 'B', 12)
+        pdf.cell(0, 10, 'Thông tin học viên', 0, 1, 'L')
+        
+        # Bảng thông tin học viên
+        pdf.set_font('DejaVu', '', 10)
+        info_width = 190
+        col1_width = 50
+        col2_width = info_width - col1_width
+        
+        # Tạo khung thông tin học viên
+        pdf.set_fill_color(240, 240, 240)
+        pdf.cell(col1_width, 10, 'Họ và tên', 1, 0, 'L', 1)
+        pdf.cell(col2_width, 10, student_name, 1, 1, 'L')
+        
+        pdf.cell(col1_width, 10, 'Email', 1, 0, 'L', 1)
+        pdf.cell(col2_width, 10, student_email, 1, 1, 'L')
+        
+        pdf.cell(col1_width, 10, 'Lớp', 1, 0, 'L', 1)
+        pdf.cell(col2_width, 10, student_class, 1, 1, 'L')
+        
+        pdf.cell(col1_width, 10, 'Thời gian nộp', 1, 0, 'L', 1)
+        pdf.cell(col2_width, 10, submission_time, 1, 1, 'L')
+        
+        pdf.ln(5)
+        
+        # Chi tiết câu trả lời
+        pdf.set_font('DejaVu', 'B', 12)
+        pdf.cell(0, 10, 'Chi tiết câu trả lời', 0, 1, 'L')
+        
+        # Tiêu đề bảng chi tiết
+        pdf.set_font('DejaVu', 'B', 9)
+        pdf.set_fill_color(240, 240, 240)
+        
+        # Xác định độ rộng cột - điều chỉnh phù hợp với nội dung
+        q_width = 65
+        user_width = 35
+        correct_width = 40
+        result_width = 25
+        points_width = 15
+        
+        # Kiểm tra tổng độ rộng cột
+        total_width = q_width + user_width + correct_width + result_width + points_width
+        page_width = 210 - 20  # A4 width - margin
+        
+        # Điều chỉnh nếu vượt quá chiều rộng trang
+        if total_width > page_width:
+            scale = page_width / total_width
+            q_width *= scale
+            user_width *= scale
+            correct_width *= scale
+            result_width *= scale
+            points_width *= scale
+        
+        # Vẽ header bảng
+        pdf.cell(q_width, 10, 'Câu hỏi', 1, 0, 'C', 1)
+        pdf.cell(user_width, 10, 'Đáp án học viên', 1, 0, 'C', 1)
+        pdf.cell(correct_width, 10, 'Đáp án đúng/Nhận xét', 1, 0, 'C', 1)
+        pdf.cell(result_width, 10, 'Kết quả', 1, 0, 'C', 1)
+        pdf.cell(points_width, 10, 'Điểm', 1, 1, 'C', 1)
+        
+        # Vẽ dữ liệu câu trả lời
+        pdf.set_font('DejaVu', '', 9)
+        
+        for q in questions:
+            q_id = str(q.get("id", ""))
+            
+            # Đáp án người dùng
+            user_ans = responses.get(q_id, [])
+            
+            # Kiểm tra đúng/sai
+            is_correct = check_answer_correctness(user_ans, q)
+            if is_correct and q.get("type") != "Essay":
+                total_correct += 1
+            
+            # Chuẩn bị nội dung dựa trên loại câu hỏi
+            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
+            
+            if q.get("type") == "Essay":
+                # Đối với câu hỏi tự luận
+                essay_answer = user_ans[0] if user_ans else "Không trả lời"
+                user_answer_text = essay_answer
+                
+                # Nhận xét của giáo viên
+                essay_comment = essay_comments.get(q_id, "Chưa có nhận xét")
+                correct_answer_text = essay_comment
+                
+                # Điểm câu hỏi tự luận
+                essay_score = essay_grades.get(q_id, 0)
+                
+                # Kết quả chấm điểm
+                if is_correct:
+                    if q_id in essay_grades:
+                        result = "Đã chấm điểm"
+                        points = essay_score
+                    else:
+                        result = "Chưa chấm điểm"
+                        points = 0
+                else:
+                    result = "Không trả lời"
+                    points = 0
+            else:
+                # Đối với câu hỏi trắc nghiệm
+                user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
+                
+                # Chuẩn bị đáp án đúng
+                q_correct = q.get("correct", [])
+                q_answers = q.get("answers", [])
+                
+                if isinstance(q_correct, str):
+                    try:
+                        q_correct = json.loads(q_correct)
+                    except:
+                        try:
+                            q_correct = [int(x.strip()) for x in q_correct.split(",")]
+                        except:
+                            q_correct = []
+                
+                if isinstance(q_answers, str):
+                    try:
+                        q_answers = json.loads(q_answers)
+                    except:
+                        q_answers = [q_answers]
+                
+                try:
+                    expected = [q_answers[i - 1] for i in q_correct]
+                except (IndexError, TypeError):
+                    expected = ["Lỗi đáp án"]
+                
+                correct_answer_text = ", ".join([str(a) for a in expected])
+                result = "Đúng" if is_correct else "Sai"
+                points = q.get("score", 0) if is_correct else 0
+            
+            # Kiểm tra chiều cao cần thiết cho mỗi ô
+            cell_heights = []
+            
+            # Ước tính chiều cao cho câu hỏi
+            q_lines = len(question_text) // 30 + 1  # Ước tính số dòng
+            q_height = max(7, q_lines * 5)  # Tối thiểu 7mm
+            cell_heights.append(q_height)
+            
+            # Ước tính chiều cao cho đáp án học viên
+            user_lines = len(user_answer_text) // 15 + 1
+            user_height = max(7, user_lines * 5)
+            cell_heights.append(user_height)
+            
+            # Ước tính chiều cao cho đáp án đúng
+            correct_lines = len(correct_answer_text) // 15 + 1
+            correct_height = max(7, correct_lines * 5)
+            cell_heights.append(correct_height)
+            
+            # Chiều cao chung cho dòng này
+            row_height = max(cell_heights)
+            
+            # Lưu vị trí x hiện tại
+            x = pdf.get_x()
+            y = pdf.get_y()
+            
+            # Kiểm tra nếu chiều cao của dòng này sẽ vượt quá trang
+            if y + row_height > pdf.page_break_trigger:
+                pdf.add_page()
+                y = pdf.get_y()
+            
+            # Vẽ câu hỏi
+            pdf.set_text_color(0, 0, 0)  # Màu đen
+            pdf.set_xy(x, y)
+            pdf.multi_cell(q_width, row_height, question_text, 1, 'L')
+            
+            # Vẽ đáp án của học viên
+            pdf.set_xy(x + q_width, y)
+            pdf.multi_cell(user_width, row_height, user_answer_text[:60] + "..." if len(user_answer_text) > 60 else user_answer_text, 1, 'L')
+            
+            # Vẽ đáp án đúng/nhận xét
+            pdf.set_xy(x + q_width + user_width, y)
+            pdf.multi_cell(correct_width, row_height, correct_answer_text[:70] + "..." if len(correct_answer_text) > 70 else correct_answer_text, 1, 'L')
+            
+            # Vẽ kết quả với màu tương ứng
+            pdf.set_xy(x + q_width + user_width + correct_width, y)
+            if "Đúng" in result or "Đã chấm điểm" in result:
+                pdf.set_text_color(0, 128, 0)  # Màu xanh lá
+            elif "Sai" in result or "Không trả lời" in result:
+                pdf.set_text_color(255, 0, 0)  # Màu đỏ
+            else:  # Trường hợp "Chưa chấm điểm"
+                pdf.set_text_color(255, 140, 0)  # Màu cam
+            pdf.cell(result_width, row_height, result, 1, 0, 'C')
+            
+            # Vẽ điểm
+            pdf.set_text_color(0, 0, 0)  # Đặt lại màu chữ
+            pdf.set_xy(x + q_width + user_width + correct_width + result_width, y)
+            pdf.cell(points_width, row_height, str(points), 1, 1, 'C')
+        
+        pdf.ln(5)
+        
+        # Tổng kết
+        pdf.set_font('DejaVu', 'B', 12)
+        pdf.cell(0, 10, 'Tổng kết', 0, 1, 'L')
+        
+        # Bảng tổng kết
+        pdf.set_font('DejaVu', '', 10)
+        pdf.set_fill_color(240, 240, 240)
+        
+        summary_col1 = 50
+        summary_col2 = 140
+        
+        pdf.cell(summary_col1, 10, 'Số câu đúng', 1, 0, 'L', 1)
+        pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
+        
+        pdf.cell(summary_col1, 10, 'Điểm số', 1, 0, 'L', 1)
+        pdf.cell(summary_col2, 10, f"{submission.get('score', 0)}/{max_possible}", 1, 1, 'L')
+        
+        pdf.cell(summary_col1, 10, 'Tỷ lệ đúng', 1, 0, 'L', 1)
+        percent = total_correct/total_questions*100 if total_questions > 0 else 0
+        pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Đạt)' if percent >= 50 else '(Chưa đạt)'}", 1, 1, 'L')
+        
+        # Lưu PDF vào buffer
+        pdf.output(buffer)
+    except Exception as e:
+        print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
+        traceback.print_exc()
+        
+        # Tạo báo cáo đơn giản nếu gặp lỗi
+        try:
+            simple_pdf = FPDF()
+            simple_pdf.add_page()
+            simple_pdf.set_font('Arial', 'B', 16)
+            simple_pdf.cell(0, 10, f'Báo cáo chi tiết - {student_name}', 0, 1, 'C')
+            simple_pdf.set_font('Arial', '', 10)
+            error_text = f'Không thể hiển thị báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}'
+            simple_pdf.multi_cell(0, 10, error_text, 0, 'L')
+            simple_pdf.output(buffer)
+        except Exception as e2:
+            print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
+    
+    buffer.seek(0)
+    return buffer
 
 
 
