@@ -3,7 +3,7 @@ from database_helper import save_question, get_all_questions, get_question_by_id
 import json
 
 def manage_questions():
-    st.title("Quản lý câu hỏi ISO 50001:2018")
+    st.title("Quản lý kiểm tra sau Đào tạo Đánh giá nội bộ ISO 50001:2018")
     
     # Khi bấm Tab này, tải câu hỏi từ database
     if "db_questions" not in st.session_state:
