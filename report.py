@@ -21,6 +21,7 @@ import pkg_resources
 
 from database_helper import get_supabase_client
 
+
 # Giả lập database_helper nếu không có
 try:
     from database_helper import check_answer_correctness, get_all_questions, get_all_users, get_user_submissions
@@ -116,7 +117,7 @@ def setup_vietnamese_fonts():
         'C:\\Windows\\Fonts',
     ]
     
-    # Các font cần tìm
+    # Các font cần tìm theo thứ tự ưu tiên
     font_files = [
         ('DejaVuSans', 'DejaVuSans.ttf'),
         ('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'),
@@ -124,6 +125,8 @@ def setup_vietnamese_fonts():
         ('Arial', 'arial.ttf'),
         ('Arial-Bold', 'arialbd.ttf'),
         ('Arial-Italic', 'ariali.ttf'),
+        ('TimesNewRoman', 'times.ttf'),
+        ('TimesNewRoman-Bold', 'timesbd.ttf'),
     ]
     
     registered_fonts = []
@@ -134,16 +137,23 @@ def setup_vietnamese_fonts():
             font_path = os.path.join(font_dir, font_file)
             if os.path.exists(font_path):
                 try:
-                    # Đăng ký font với reportlab nếu cần
-                    try:
-                        pdfmetrics.registerFont(TTFont(font_name, font_path))
-                    except Exception as e:
-                        print(f"Không thể đăng ký font {font_name} cho reportlab: {str(e)}")
+                    # Đăng ký font với reportlab nếu đã import
+                    if 'pdfmetrics' in globals() and 'TTFont' in globals():
+                        try:
+                            pdfmetrics.registerFont(TTFont(font_name, font_path))
+                            print(f"Đã đăng ký font {font_name} từ {font_path}")
+                        except Exception as e:
+                            print(f"Không thể đăng ký font {font_name} cho reportlab: {str(e)}")
                     
                     registered_fonts.append((font_name, font_path))
                     break
                 except Exception as e:
                     print(f"Lỗi khi đăng ký font {font_name}: {str(e)}")
+    
+    # Thêm các font mặc định vào cuối danh sách nếu chưa có font nào được đăng ký
+    if not registered_fonts:
+        registered_fonts.append(('Helvetica', ''))
+        registered_fonts.append(('Courier', ''))
     
     return registered_fonts
 
@@ -186,9 +196,16 @@ def get_download_link_docx(buffer, filename, text):
 
 def get_download_link_pdf(buffer, filename, text):
     """Tạo link tải xuống cho file PDF"""
-    b64 = base64.b64encode(buffer.getvalue()).decode()
-    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
-    return href
+    try:
+        if buffer and hasattr(buffer, 'getvalue'):
+            b64 = base64.b64encode(buffer.getvalue()).decode()
+            href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
+            return href
+        else:
+            return f'<span style="color:red;">Không thể tạo link tải PDF. Lỗi tạo PDF.</span>'
+    except Exception as e:
+        print(f"Lỗi khi tạo link tải PDF: {str(e)}")
+        return f'<span style="color:red;">Lỗi tạo link: {str(e)}</span>'
 
 def export_to_excel(dataframes, sheet_names, filename):
     """Tạo file Excel với nhiều sheet từ các DataFrame"""
@@ -269,25 +286,64 @@ class UNIOCDF_FPDF(FPDF):
         super().__init__(orientation=orientation, unit=unit, format=format)
         self.title = title
         
-        # Khắc phục lỗi tiếng Việt bằng cách thiết lập encode utf8
-        self.set_doc_option('core_fonts_encoding', 'utf-8')
+        # Kiểm tra phiên bản FPDF
+        try:
+            fpdf_version = pkg_resources.get_distribution("fpdf").version
+            self.is_fpdf2 = fpdf_version.startswith("2.")
+        except:
+            self.is_fpdf2 = False
+            
+        # Khắc phục lỗi tiếng Việt bằng cách thiết lập encode utf8 (chỉ cho FPDF2)
+        if self.is_fpdf2:
+            try:
+                self.set_doc_option('core_fonts_encoding', 'utf-8')
+            except:
+                pass
         
-        # Sử dụng DejaVu Sans (hỗ trợ Unicode) thay vì Times New Roman
-        self.add_font('DejaVu', '', font_path='DejaVuSans.ttf', uni=True)
-        self.add_font('DejaVu', 'B', font_path='DejaVuSans-Bold.ttf', uni=True)
-        self.add_font('DejaVu', 'I', font_path='DejaVuSans-Oblique.ttf', uni=True)
+        # Thêm các font có sẵn
+        font_dirs = [
+            os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(),
+            'C:\\Windows\\Fonts',
+        ]
+        
+        font_files = [
+            ('Arial', 'arial.ttf'),
+            ('Arial-Bold', 'arialbd.ttf'),
+            ('Arial-Italic', 'ariali.ttf'),
+        ]
+        
+        # Tìm và đăng ký font
+        for font_name, font_file in font_files:
+            for font_dir in font_dirs:
+                font_path = os.path.join(font_dir, font_file)
+                if os.path.exists(font_path):
+                    try:
+                        if self.is_fpdf2:
+                            self.add_font(font_name, '', font_path, uni=True)
+                        else:
+                            self.add_font(font_name, '', font_path)
+                        break
+                    except Exception as e:
+                        print(f"Lỗi khi đăng ký font {font_name}: {str(e)}")
         
     def header(self):
         # Font và tiêu đề
-        self.set_font('DejaVu', 'B', 15)
-        
+        try:
+            self.set_font('Arial', 'B', 15)
+        except:
+            self.set_font('Helvetica', 'B', 15)
+            
         # Tiêu đề ở giữa
         self.cell(0, 10, self.title, 0, 1, 'C')
         
         # Thời gian
-        self.set_font('DejaVu', 'I', 8)
+        try:
+            self.set_font('Arial', 'I', 8)
+        except:
+            self.set_font('Helvetica', 'I', 8)
+            
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        self.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        self.cell(0, 5, f'Thoi gian xuat bao cao: {timestamp}', 0, 1, 'R')
         
         # Line break
         self.ln(5)
@@ -297,64 +353,74 @@ class UNIOCDF_FPDF(FPDF):
         self.set_y(-15)
         
         # Font
-        self.set_font('DejaVu', 'I', 8)
-        
+        try:
+            self.set_font('Arial', 'I', 8)
+        except:
+            self.set_font('Helvetica', 'I', 8)
+            
         # Số trang
         self.cell(0, 10, f'Trang {self.page_no()}/{self.alias_nb_pages()}', 0, 0, 'C')
         
         # Thêm chân trang hệ thống
-        self.cell(0, 10, 'Hệ thống Khảo sát & Đánh giá', 0, 0, 'R')
+        self.cell(0, 10, 'He thong Khao sat & Danh gia', 0, 0, 'R')
 
 # Tạo một instance FPDF có khả năng xử lý Unicode
 def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
-    """Tạo FPDF với hỗ trợ Unicode"""
+    """Tạo FPDF với hỗ trợ Unicode tốt hơn"""
     try:
-        # Kiểm tra xem font đã được tìm thấy chưa
-        font_dirs = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'assets', 'fonts'),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'fonts'),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'assets'),
-            os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(),
-            '/usr/share/fonts/truetype',
-            '/usr/share/fonts/truetype/dejavu',
-            '/usr/share/fonts/TTF',
-            'C:\\Windows\\Fonts',
-        ]
+        # Đăng ký font trước khi tạo PDF
+        registered_fonts = setup_vietnamese_fonts()
+        font_found = len(registered_fonts) > 0
         
-        # Tìm font DejaVu Sans
-        font_found = False
-        font_paths = {
-            'DejaVuSans.ttf': None,
-            'DejaVuSans-Bold.ttf': None,
-            'DejaVuSans-Oblique.ttf': None
-        }
-        
-        for font_dir in font_dirs:
-            for font_file in font_paths:
-                if os.path.exists(os.path.join(font_dir, font_file)):
-                    font_paths[font_file] = os.path.join(font_dir, font_file)
-        
-        if all(font_paths.values()):
-            font_found = True
-        
-        # Tạo PDF mới
+        # Tạo PDF mới - Kiểm tra phiên bản FPDF
+        try:
+            fpdf_version = pkg_resources.get_distribution("fpdf").version
+            is_fpdf2 = fpdf_version.startswith("2.")
+        except:
+            is_fpdf2 = False
+            
         pdf = FPDF(orientation=orientation, unit='mm', format=format)
         
-        # Thiết lập mã hóa UTF-8
-        pdf.set_doc_option('core_fonts_encoding', 'utf-8')
+        # Thiết lập mã hóa UTF-8 cho FPDF2
+        if is_fpdf2:
+            try:
+                pdf.set_doc_option('core_fonts_encoding', 'utf-8')
+            except:
+                pass
         
-        # Thêm các font Unicode
+        # Thêm các font Unicode theo thứ tự ưu tiên
         if font_found:
-            pdf.add_font('DejaVu', '', font_paths['DejaVuSans.ttf'], uni=True)
-            pdf.add_font('DejaVu', 'B', font_paths['DejaVuSans-Bold.ttf'], uni=True)
-            pdf.add_font('DejaVu', 'I', font_paths['DejaVuSans-Oblique.ttf'], uni=True)
+            for font_name, font_path in registered_fonts:
+                try:
+                    # Đối với FPDF2, chúng ta sử dụng add_font với uni=True
+                    # Đối với FPDF1, chúng ta không sử dụng tham số uni
+                    if is_fpdf2:
+                        pdf.add_font(font_name, '', font_path, uni=True)
+                    else:
+                        pdf.add_font(font_name, '', font_path)
+                        
+                    if font_name.endswith('-Bold'):
+                        if is_fpdf2:
+                            pdf.add_font(font_name.replace('-Bold', ''), 'B', font_path, uni=True)
+                        else:
+                            pdf.add_font(font_name.replace('-Bold', ''), 'B', font_path)
+                    elif font_name.endswith('-Oblique') or font_name.endswith('-Italic'):
+                        if is_fpdf2:
+                            pdf.add_font(font_name.split('-')[0], 'I', font_path, uni=True)
+                        else:
+                            pdf.add_font(font_name.split('-')[0], 'I', font_path)
+                except Exception as e:
+                    print(f"Lỗi khi thêm font {font_name}: {str(e)}")
         else:
-            # Nếu không tìm thấy font DejaVu, thử dùng font mặc định
-            pdf.add_font('Arial', '', "arial.ttf", uni=True)
+            # Nếu không tìm thấy font Unicode, sử dụng font mặc định
+            print("Không tìm thấy font Unicode, sử dụng font mặc định")
         
         # Thiết lập các tùy chọn khác
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.alias_nb_pages()
+        
+        # Thiết lập tựa đề
+        pdf.set_title(title)
         
         return pdf
     except Exception as e:
@@ -372,14 +438,13 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
             return None
 
 def dataframe_to_pdf_fpdf(df, title, filename):
-    """Tạo file PDF từ DataFrame sử dụng FPDF2 với hỗ trợ Unicode"""
+    """Tạo file PDF từ DataFrame sử dụng FPDF với hỗ trợ Unicode tốt hơn"""
     buffer = io.BytesIO()
-    
     try:
         # Xác định hướng trang dựa vào số lượng cột
         orientation = 'L' if len(df.columns) > 5 else 'P'
         
-        # Sử dụng FPDF2 có hỗ trợ Unicode
+        # Sử dụng FPDF có hỗ trợ Unicode tốt hơn
         pdf = create_unicode_pdf(orientation=orientation, title=title)
         
         if pdf is None:
@@ -388,13 +453,27 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         pdf.add_page()
         
         # Thêm tiêu đề
-        pdf.set_font('DejaVu', 'B', 16)
+        try:
+            pdf.set_font('DejaVuSans', 'B', 16)
+        except:
+            try:
+                pdf.set_font('Arial', 'B', 16)
+            except:
+                pdf.set_font('Helvetica', 'B', 16)
+                
         pdf.cell(0, 10, title, 0, 1, 'C')
         
         # Thêm thời gian báo cáo
-        pdf.set_font('DejaVu', 'I', 10)
+        try:
+            pdf.set_font('DejaVuSans', 'I', 10)
+        except:
+            try:
+                pdf.set_font('Arial', 'I', 10)
+            except:
+                pdf.set_font('Helvetica', 'I', 10)
+                
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        pdf.cell(0, 5, f'Thoi gian xuat bao cao: {timestamp}', 0, 1, 'R')
         pdf.ln(5)
         
         # Xác định kích thước trang và số cột
@@ -402,142 +481,177 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         margin = 10
         usable_width = page_width - 2*margin
         
-        # Tính toán độ rộng cột hợp lý
+        # Chuyển đổi dữ liệu thành chuỗi và tính độ rộng tối đa cho mỗi cột
+        data = []
+        headers = df.columns.tolist()
+        
+        # Đảm bảo dữ liệu là chuỗi và không quá dài
+        for _, row in df.iterrows():
+            row_data = []
+            for col in headers:
+                # Chuyển đổi tất cả kiểu dữ liệu thành chuỗi
+                val = str(row[col]) if pd.notna(row[col]) else ""
+                # Cắt bớt chuỗi dài để tránh vấn đề hiển thị
+                if len(val) > 30:
+                    val = val[:27] + "..."
+                row_data.append(val)
+            data.append(row_data)
+        
+        # Tính toán độ rộng tối ưu cho mỗi cột
         col_widths = []
-        max_content_widths = []
         
-        # Mặc định font cho nội dung
-        pdf.set_font('DejaVu', '', 9)
+        # Font cho nội dung
+        try:
+            pdf.set_font('DejaVuSans', '', 8)
+        except:
+            try:
+                pdf.set_font('Arial', '', 8)
+            except:
+                pdf.set_font('Helvetica', '', 8)
         
-        # Ước tính độ rộng tối đa cho mỗi cột
-        for i, col in enumerate(df.columns):
+        for i, col in enumerate(headers):
             # Độ rộng tiêu đề
             header_width = pdf.get_string_width(str(col)) + 6  # Thêm padding
             
-            # Độ rộng nội dung (kiểm tra 20 dòng đầu tiên)
-            content_widths = []
-            for j in range(min(20, len(df))):
-                cell_content = str(df.iloc[j, i])
-                # Giới hạn độ dài chuỗi để tránh quá rộng
-                if len(cell_content) > 100:
-                    cell_content = cell_content[:97] + "..."
-                content_width = pdf.get_string_width(cell_content) + 6  # Thêm padding
-                content_widths.append(content_width)
+            # Độ rộng nội dung (kiểm tra tất cả dòng)
+            max_content_width = 0
+            for row in data:
+                if i < len(row):  # Đảm bảo không vượt quá số cột
+                    content_width = pdf.get_string_width(str(row[i])) + 6
+                    max_content_width = max(max_content_width, content_width)
             
-            max_content_width = max(content_widths) if content_widths else 0
+            # Lấy giá trị lớn nhất giữa độ rộng tiêu đề và nội dung
             max_width = max(header_width, max_content_width)
             
             # Giới hạn độ rộng cột
-            max_col_width = 50  # mm
-            col_width = min(max_col_width, max(10, max_width))
-            
+            col_width = min(40, max(15, max_width))
             col_widths.append(col_width)
-            max_content_widths.append(max_content_width)
         
-        # Điều chỉnh để tổng độ rộng không vượt quá chiều rộng khả dụng
+        # Điều chỉnh độ rộng cột để vừa với trang
         total_width = sum(col_widths)
         if total_width > usable_width:
             scale_factor = usable_width / total_width
             col_widths = [width * scale_factor for width in col_widths]
         
-        # Tạo tiêu đề cột
-        pdf.set_font('DejaVu', 'B', 10)
+        # Tiêu đề cột
+        try:
+            pdf.set_font('DejaVuSans', 'B', 9)
+        except:
+            try:
+                pdf.set_font('Arial', 'B', 9)
+            except:
+                pdf.set_font('Helvetica', 'B', 9)
+                
         pdf.set_fill_color(240, 240, 240)
         
-        # Lưu vị trí bắt đầu
-        start_x = pdf.get_x()
-        start_y = pdf.get_y()
-        
-        # Vẽ header với độ cao đồng nhất
+        # Vẽ header cột
         header_height = 10
-        for i, col_name in enumerate(df.columns):
-            # Tính toán vị trí x mới
-            new_x = start_x + sum(col_widths[:i])
-            pdf.set_xy(new_x, start_y)
+        for i, col_name in enumerate(headers):
+            # Cắt ngắn tiêu đề nếu quá dài
+            display_name = str(col_name)
+            if len(display_name) > 20:
+                display_name = display_name[:17] + "..."
             
-            # Cắt ngắn tên cột nếu quá dài
-            if len(str(col_name)) > 25:
-                col_name = str(col_name)[:22] + "..."
-                
-            pdf.cell(col_widths[i], header_height, str(col_name), 1, 0, 'C', 1)
+            pdf.cell(col_widths[i], header_height, display_name, 1, 0, 'C', 1)
         
         pdf.ln(header_height)
         
-        # Vẽ nội dung với font nhỏ hơn
-        pdf.set_font('DejaVu', '', 8)
-        
-        # Chiều cao dòng cơ bản
-        row_height = 7
+        # Nội dung bảng với font nhỏ hơn
+        try:
+            pdf.set_font('DejaVuSans', '', 8)
+        except:
+            try:
+                pdf.set_font('Arial', '', 8)
+            except:
+                pdf.set_font('Helvetica', '', 8)
         
         # Giới hạn số lượng hàng để tránh file quá lớn
         max_rows = min(1000, len(df))
+        row_height = 7  # Chiều cao cơ bản
         
         for i in range(max_rows):
-            # Reset về đầu dòng mới
-            row_start_x = pdf.get_x()
-            row_start_y = pdf.get_y()
-            max_height = row_height
-            
-            # Kiểm tra xem có đủ không gian cho dòng mới không
-            if row_start_y + row_height > pdf.page_break_trigger:
+            # Kiểm tra nếu còn đủ không gian trên trang
+            if pdf.get_y() + row_height > pdf.page_break_trigger:
                 pdf.add_page()
-                row_start_y = pdf.get_y()
+                
+                # Vẽ lại header sau khi chuyển trang
+                try:
+                    pdf.set_font('DejaVuSans', 'B', 9)
+                except:
+                    try:
+                        pdf.set_font('Arial', 'B', 9)
+                    except:
+                        pdf.set_font('Helvetica', 'B', 9)
+                        
+                pdf.set_fill_color(240, 240, 240)
+                
+                for j, col_name in enumerate(headers):
+                    display_name = str(col_name)
+                    if len(display_name) > 20:
+                        display_name = display_name[:17] + "..."
+                    pdf.cell(col_widths[j], header_height, display_name, 1, 0, 'C', 1)
+                pdf.ln(header_height)
+                
+                try:
+                    pdf.set_font('DejaVuSans', '', 8)
+                except:
+                    try:
+                        pdf.set_font('Arial', '', 8)
+                    except:
+                        pdf.set_font('Helvetica', '', 8)
             
-            # Vẽ từng ô trong hàng hiện tại
-            for j, col_name in enumerate(df.columns):
-                cell_x = row_start_x + sum(col_widths[:j])
-                content = str(df.iloc[i, j])
-                
-                # Cắt ngắn nội dung nếu quá dài
-                if len(content) > 100:
-                    content = content[:97] + "..."
-                
-                # Tính số dòng cần thiết cho nội dung này
-                content_width = pdf.get_string_width(content)
-                if content_width > col_widths[j] - 4:  # Trừ đi padding
-                    # Ước tính số dòng cần thiết
-                    num_lines = int(content_width / (col_widths[j] - 4)) + 1
-                    # Tính chiều cao cần thiết
-                    cell_height = max(row_height, num_lines * 5)  # 5mm cho mỗi dòng
+            # Vẽ nội dung hàng
+            for j, width in enumerate(col_widths):
+                if j < len(data[i]):  # Đảm bảo không vượt quá số cột
+                    cell_text = data[i][j]
+                    # Căn giữa cho các số, căn trái cho text
+                    align = 'C' if cell_text.replace('.', '', 1).isdigit() else 'L'
+                    pdf.cell(width, row_height, cell_text, 1, 0, align)
                 else:
-                    cell_height = row_height
-                
-                # Cập nhật chiều cao tối đa cho dòng hiện tại
-                max_height = max(max_height, cell_height)
-                
-                # Vẽ ô với nội dung
-                pdf.set_xy(cell_x, row_start_y)
-                pdf.multi_cell(col_widths[j], cell_height, content, 1, 'L')
+                    pdf.cell(width, row_height, "", 1, 0, 'C')
             
-            # Di chuyển đến dòng tiếp theo
-            pdf.set_y(row_start_y + max_height)
+            pdf.ln(row_height)
+        
+        # Thêm chân trang
+        pdf.set_y(-20)
+        try:
+            pdf.set_font('DejaVuSans', 'I', 8)
+        except:
+            try:
+                pdf.set_font('Arial', 'I', 8)
+            except:
+                pdf.set_font('Helvetica', 'I', 8)
+                
+        pdf.cell(0, 10, f'Trang {pdf.page_no()}/{"{nb}"}', 0, 0, 'C')
+        pdf.cell(0, 10, 'He thong Khao sat & Danh gia', 0, 0, 'R')
         
         # Lưu PDF vào buffer
         pdf.output(buffer)
-        
+        buffer.seek(0)
+        return buffer
     except Exception as e:
-        print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
+        print(f"Lỗi khi tạo PDF: {str(e)}")
         traceback.print_exc()
         
-        # Tạo báo cáo đơn giản nếu gặp lỗi
+        # Trả về buffer trống khi có lỗi để tránh lỗi NoneType
+        empty_buffer = io.BytesIO()
         try:
             simple_pdf = FPDF()
             simple_pdf.add_page()
-            simple_pdf.set_font('Arial', 'B', 16)
-            simple_pdf.cell(0, 10, title, 0, 1, 'C')
-            simple_pdf.set_font('Arial', '', 10)
-            simple_pdf.multi_cell(0, 10, f'Không thể tạo báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}', 0, 'L')
-            simple_pdf.output(buffer)
-        except Exception as e2:
-            print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
-    
-    buffer.seek(0)
-    return buffer
-
-# Bổ sung vào file report.py
+            simple_pdf.set_font('Helvetica', 'B', 16)
+            simple_pdf.cell(0, 10, 'Bao cao loi', 0, 1, 'C')
+            simple_pdf.set_font('Helvetica', '', 12)
+            simple_pdf.multi_cell(0, 10, f'Khong the tao PDF: {str(e)}', 0, 'L')
+            simple_pdf.output(empty_buffer)
+        except:
+            # Nếu cả việc tạo PDF lỗi cũng thất bại, chỉ trả về buffer trống
+            pass
+        
+        empty_buffer.seek(0)
+        return empty_buffer
 
 def create_student_report_docx(student_name, student_email, student_class, submission, questions, max_possible):
-    """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX, bao gồm câu tự luận"""
+    """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX"""
     try:
         doc = Document()
         
@@ -609,28 +723,6 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         cells[0].text = "Thời gian nộp"
         cells[1].text = submission_time
         
-        # Lấy điểm câu hỏi tự luận (nếu có)
-        essay_grades = {}
-        if "essay_grades" in submission:
-            if isinstance(submission["essay_grades"], str):
-                try:
-                    essay_grades = json.loads(submission["essay_grades"])
-                except:
-                    essay_grades = {}
-            else:
-                essay_grades = submission.get("essay_grades", {})
-                
-        # Lấy nhận xét câu hỏi tự luận (nếu có)
-        essay_comments = {}
-        if "essay_comments" in submission:
-            if isinstance(submission["essay_comments"], str):
-                try:
-                    essay_comments = json.loads(submission["essay_comments"])
-                except:
-                    essay_comments = {}
-            else:
-                essay_comments = submission.get("essay_comments", {})
-        
         # Tính toán thông tin về bài làm
         total_correct = 0
         total_questions = len(questions)
@@ -638,7 +730,6 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         doc.add_heading("Chi tiết câu trả lời", level=2)
         
         # Tạo bảng chi tiết câu trả lời - cải thiện layout với cột rộng hợp lý
-        # Thêm cột cho loại câu hỏi
         answers_table = doc.add_table(rows=1, cols=5, style='Table Grid')
         
         # Thiết lập độ rộng tương đối cho các cột
@@ -649,7 +740,7 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         
         # Thêm tiêu đề cho bảng với định dạng rõ ràng
         header_cells = answers_table.rows[0].cells
-        headers = ["Câu hỏi", "Đáp án của học viên", "Đáp án đúng/Nhận xét", "Kết quả", "Điểm"]
+        headers = ["Câu hỏi", "Đáp án của học viên", "Đáp án đúng", "Kết quả", "Điểm"]
         
         # Tạo nền xám cho hàng tiêu đề
         for i, cell in enumerate(header_cells):
@@ -680,94 +771,63 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             # Đáp án người dùng
             user_ans = responses.get(q_id, [])
             
+            # Chuẩn bị đáp án đúng
+            q_correct = q.get("correct", [])
+            q_answers = q.get("answers", [])
+            
+            if isinstance(q_correct, str):
+                try:
+                    q_correct = json.loads(q_correct)
+                except:
+                    try:
+                        q_correct = [int(x.strip()) for x in q_correct.split(",")]
+                    except:
+                        q_correct = []
+            
+            if isinstance(q_answers, str):
+                try:
+                    q_answers = json.loads(q_answers)
+                except:
+                    q_answers = [q_answers]
+            
+            try:
+                expected = [q_answers[i - 1] for i in q_correct]
+            except (IndexError, TypeError):
+                expected = ["Lỗi đáp án"]
+            
             # Kiểm tra đúng/sai
             is_correct = check_answer_correctness(user_ans, q)
-            if is_correct and q.get("type") != "Essay":  # Câu tự luận đúng nhưng điểm cần được chấm riêng
+            if is_correct:
                 total_correct += 1
+                result = "Đúng"
+                points = q.get("score", 0)
+            else:
+                result = "Sai"
+                points = 0
             
             # Thêm hàng mới vào bảng
             row_cells = answers_table.add_row().cells
             
             # Thêm thông tin câu hỏi
             row_cells[0].text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
-            
-            # Xử lý nội dung đáp án dựa trên loại câu hỏi
-            if q.get("type") == "Essay":
-                # Đối với câu hỏi tự luận
-                essay_answer = user_ans[0] if user_ans else "Không trả lời"
-                row_cells[1].text = essay_answer
-                
-                # Hiển thị nhận xét giáo viên nếu có
-                essay_comment = essay_comments.get(q_id, "Chưa có nhận xét")
-                row_cells[2].text = essay_comment
-                
-                # Điểm câu hỏi tự luận
-                essay_score = essay_grades.get(q_id, 0)
-                
-                # Kết quả dựa trên việc học viên có trả lời hay không và đã chấm điểm chưa
-                if is_correct:
-                    if q_id in essay_grades:
-                        result = "Đã chấm điểm"
-                        points = essay_score
-                    else:
-                        result = "Chưa chấm điểm"
-                        points = 0
-                else:
-                    result = "Không trả lời"
-                    points = 0
-                
-                row_cells[3].text = result
-                row_cells[4].text = str(points)
-                
-            else:
-                # Đối với câu hỏi trắc nghiệm
-                row_cells[1].text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
-                
-                # Chuẩn bị đáp án đúng
-                q_correct = q.get("correct", [])
-                q_answers = q.get("answers", [])
-                
-                if isinstance(q_correct, str):
-                    try:
-                        q_correct = json.loads(q_correct)
-                    except:
-                        try:
-                            q_correct = [int(x.strip()) for x in q_correct.split(",")]
-                        except:
-                            q_correct = []
-                
-                if isinstance(q_answers, str):
-                    try:
-                        q_answers = json.loads(q_answers)
-                    except:
-                        q_answers = [q_answers]
-                
-                try:
-                    expected = [q_answers[i - 1] for i in q_correct]
-                except (IndexError, TypeError):
-                    expected = ["Lỗi đáp án"]
-                
-                row_cells[2].text = ", ".join([str(a) for a in expected])
-                row_cells[3].text = "Đúng" if is_correct else "Sai"
-                row_cells[4].text = str(q.get("score", 0) if is_correct else 0)
+            row_cells[1].text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
+            row_cells[2].text = ", ".join([str(a) for a in expected])
+            row_cells[3].text = result
             
             # Đặt màu cho kết quả
             for paragraph in row_cells[3].paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 if not paragraph.runs:
-                    paragraph.add_run(row_cells[3].text)
+                    paragraph.add_run(result)
                 run = paragraph.runs[0]
-                if "Đúng" in row_cells[3].text or "Đã chấm điểm" in row_cells[3].text:
+                if is_correct:
                     run.font.color.rgb = RGBColor(0, 128, 0)  # Màu xanh lá cho đúng
                     run.bold = True
-                elif "Sai" in row_cells[3].text or "Không trả lời" in row_cells[3].text:
+                else:
                     run.font.color.rgb = RGBColor(255, 0, 0)  # Màu đỏ cho sai
                     run.bold = True
-                else:  # Trường hợp "Chưa chấm điểm"
-                    run.font.color.rgb = RGBColor(255, 140, 0)  # Màu cam
-                    run.bold = True
             
-            # Căn giữa cột điểm
+            row_cells[4].text = str(points)
             row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Thêm tổng kết với định dạng rõ ràng
@@ -824,27 +884,30 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         return buffer
 
 def create_student_report_pdf_fpdf(student_name, student_email, student_class, submission, questions, max_possible):
-    """Tạo báo cáo chi tiết bài làm của học viên dạng PDF sử dụng FPDF2 với hỗ trợ Unicode, bao gồm câu tự luận"""
+    """Tạo báo cáo chi tiết bài làm của học viên dạng PDF sử dụng FPDF với hỗ trợ Unicode tốt hơn"""
     buffer = io.BytesIO()
     
     try:
         # Tạo PDF mới với hỗ trợ Unicode
-        title = f"Báo cáo chi tiết - {student_name}"
-        pdf = create_unicode_pdf(title=title)
+        title = f"Bao cao chi tiet - {student_name}"  # Tránh dấu tiếng Việt trong tiêu đề
         
-        if pdf is None:
-            raise Exception("Không thể tạo đối tượng PDF")
+        # Xác định orientation dựa trên số lượng câu hỏi
+        orientation = 'L' if len(questions) > 10 else 'P'
+        pdf = FPDF(orientation=orientation, format='A4')
         
+        # Thiết lập các tùy chọn
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.alias_nb_pages()
         pdf.add_page()
         
-        # Thiết lập font cho tiêu đề
-        pdf.set_font('DejaVu', 'B', 16)
+        # Thêm tiêu đề - sử dụng font mặc định
+        pdf.set_font('Helvetica', 'B', 16)
         pdf.cell(0, 10, title, 0, 1, 'C')
         
         # Thêm thời gian báo cáo
-        pdf.set_font('DejaVu', 'I', 10)
+        pdf.set_font('Helvetica', 'I', 10)
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        pdf.cell(0, 5, f'Thoi gian xuat bao cao: {timestamp}', 0, 1, 'R')
         pdf.ln(5)
         
         # Tính toán thông tin về bài làm
@@ -858,28 +921,6 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
                 responses = json.loads(responses)
             except:
                 responses = {}
-                
-        # Lấy điểm câu hỏi tự luận (nếu có)
-        essay_grades = {}
-        if "essay_grades" in submission:
-            if isinstance(submission["essay_grades"], str):
-                try:
-                    essay_grades = json.loads(submission["essay_grades"])
-                except:
-                    essay_grades = {}
-            else:
-                essay_grades = submission.get("essay_grades", {})
-                
-        # Lấy nhận xét câu hỏi tự luận (nếu có)
-        essay_comments = {}
-        if "essay_comments" in submission:
-            if isinstance(submission["essay_comments"], str):
-                try:
-                    essay_comments = json.loads(submission["essay_comments"])
-                except:
-                    essay_comments = {}
-            else:
-                essay_comments = submission.get("essay_comments", {})
         
         # Xử lý timestamp
         submission_time = "Không xác định"
@@ -895,69 +936,65 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             except:
                 pass
         
-        # Thông tin học viên
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Thông tin học viên', 0, 1, 'L')
+        # Thông tin học viên - Tiêu đề
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 10, 'Thong tin hoc vien', 0, 1, 'L')
         
         # Bảng thông tin học viên
-        pdf.set_font('DejaVu', '', 10)
-        info_width = 190
+        pdf.set_font('Helvetica', '', 10)
+        info_width = 190 if orientation == 'P' else 277
         col1_width = 50
         col2_width = info_width - col1_width
         
         # Tạo khung thông tin học viên
         pdf.set_fill_color(240, 240, 240)
-        pdf.cell(col1_width, 10, 'Họ và tên', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_name, 1, 1, 'L')
         
-        pdf.cell(col1_width, 10, 'Email', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_email, 1, 1, 'L')
+        # Thông tin học viên - loại bỏ dấu tiếng Việt để tránh lỗi
+        info_data = [
+            ['Ho va ten', student_name],
+            ['Email', student_email],
+            ['Lop', student_class],
+            ['Thoi gian nop', submission_time]
+        ]
         
-        pdf.cell(col1_width, 10, 'Lớp', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_class, 1, 1, 'L')
-        
-        pdf.cell(col1_width, 10, 'Thời gian nộp', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, submission_time, 1, 1, 'L')
+        for label, value in info_data:
+            pdf.cell(col1_width, 10, label, 1, 0, 'L', 1)
+            pdf.cell(col2_width, 10, value, 1, 1, 'L')
         
         pdf.ln(5)
         
-        # Chi tiết câu trả lời
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Chi tiết câu trả lời', 0, 1, 'L')
+        # Chi tiết câu trả lời - Tiêu đề
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 10, 'Chi tiet cau tra loi', 0, 1, 'L')
         
         # Tiêu đề bảng chi tiết
-        pdf.set_font('DejaVu', 'B', 9)
+        pdf.set_font('Helvetica', 'B', 9)
         pdf.set_fill_color(240, 240, 240)
         
-        # Xác định độ rộng cột - điều chỉnh phù hợp với nội dung
-        q_width = 65
-        user_width = 35
-        correct_width = 40
-        result_width = 25
-        points_width = 15
-        
-        # Kiểm tra tổng độ rộng cột
-        total_width = q_width + user_width + correct_width + result_width + points_width
-        page_width = 210 - 20  # A4 width - margin
-        
-        # Điều chỉnh nếu vượt quá chiều rộng trang
-        if total_width > page_width:
-            scale = page_width / total_width
-            q_width *= scale
-            user_width *= scale
-            correct_width *= scale
-            result_width *= scale
-            points_width *= scale
+        # Xác định độ rộng cột - điều chỉnh phù hợp với nội dung và orientation
+        if orientation == 'P':
+            q_width = 70
+            user_width = 35
+            correct_width = 35
+            result_width = 25
+            points_width = 25
+        else:
+            q_width = 120
+            user_width = 50
+            correct_width = 50
+            result_width = 30
+            points_width = 27
         
         # Vẽ header bảng
-        pdf.cell(q_width, 10, 'Câu hỏi', 1, 0, 'C', 1)
-        pdf.cell(user_width, 10, 'Đáp án học viên', 1, 0, 'C', 1)
-        pdf.cell(correct_width, 10, 'Đáp án đúng/Nhận xét', 1, 0, 'C', 1)
-        pdf.cell(result_width, 10, 'Kết quả', 1, 0, 'C', 1)
-        pdf.cell(points_width, 10, 'Điểm', 1, 1, 'C', 1)
+        headers = ['Cau hoi', 'Dap an hoc vien', 'Dap an dung', 'Ket qua', 'Diem']
+        widths = [q_width, user_width, correct_width, result_width, points_width]
+        
+        for i, header in enumerate(headers):
+            pdf.cell(widths[i], 10, header, 1, 0, 'C', 1)
+        pdf.ln(10)
         
         # Vẽ dữ liệu câu trả lời
-        pdf.set_font('DejaVu', '', 9)
+        pdf.set_font('Helvetica', '', 9)
         
         for q in questions:
             q_id = str(q.get("id", ""))
@@ -965,152 +1002,115 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             # Đáp án người dùng
             user_ans = responses.get(q_id, [])
             
+            # Chuẩn bị đáp án đúng
+            q_correct = q.get("correct", [])
+            q_answers = q.get("answers", [])
+            
+            if isinstance(q_correct, str):
+                try:
+                    q_correct = json.loads(q_correct)
+                except:
+                    try:
+                        q_correct = [int(x.strip()) for x in q_correct.split(",")]
+                    except:
+                        q_correct = []
+            
+            if isinstance(q_answers, str):
+                try:
+                    q_answers = json.loads(q_answers)
+                except:
+                    q_answers = [q_answers]
+            
+            try:
+                expected = [q_answers[i - 1] for i in q_correct]
+            except (IndexError, TypeError):
+                expected = ["Loi dap an"]
+            
             # Kiểm tra đúng/sai
             is_correct = check_answer_correctness(user_ans, q)
-            if is_correct and q.get("type") != "Essay":
+            if is_correct:
                 total_correct += 1
-            
-            # Chuẩn bị nội dung dựa trên loại câu hỏi
-            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
-            
-            if q.get("type") == "Essay":
-                # Đối với câu hỏi tự luận
-                essay_answer = user_ans[0] if user_ans else "Không trả lời"
-                user_answer_text = essay_answer
-                
-                # Nhận xét của giáo viên
-                essay_comment = essay_comments.get(q_id, "Chưa có nhận xét")
-                correct_answer_text = essay_comment
-                
-                # Điểm câu hỏi tự luận
-                essay_score = essay_grades.get(q_id, 0)
-                
-                # Kết quả chấm điểm
-                if is_correct:
-                    if q_id in essay_grades:
-                        result = "Đã chấm điểm"
-                        points = essay_score
-                    else:
-                        result = "Chưa chấm điểm"
-                        points = 0
-                else:
-                    result = "Không trả lời"
-                    points = 0
+                result = "Dung"
+                points = q.get("score", 0)
             else:
-                # Đối với câu hỏi trắc nghiệm
-                user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
+                result = "Sai"
+                points = 0
+            
+            # Chuẩn bị nội dung (loại bỏ dấu tiếng Việt)
+            question_text = f"Cau {q.get('id', '')}: {q.get('question', '')}"
+            # Giới hạn độ dài của các chuỗi
+            if len(question_text) > (45 if orientation == 'P' else 80):
+                question_text = question_text[:(42 if orientation == 'P' else 77)] + "..."
                 
-                # Chuẩn bị đáp án đúng
-                q_correct = q.get("correct", [])
-                q_answers = q.get("answers", [])
+            user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Khong tra loi"
+            if len(user_answer_text) > (25 if orientation == 'P' else 40):
+                user_answer_text = user_answer_text[:(22 if orientation == 'P' else 37)] + "..."
                 
-                if isinstance(q_correct, str):
-                    try:
-                        q_correct = json.loads(q_correct)
-                    except:
-                        try:
-                            q_correct = [int(x.strip()) for x in q_correct.split(",")]
-                        except:
-                            q_correct = []
-                
-                if isinstance(q_answers, str):
-                    try:
-                        q_answers = json.loads(q_answers)
-                    except:
-                        q_answers = [q_answers]
-                
-                try:
-                    expected = [q_answers[i - 1] for i in q_correct]
-                except (IndexError, TypeError):
-                    expected = ["Lỗi đáp án"]
-                
-                correct_answer_text = ", ".join([str(a) for a in expected])
-                result = "Đúng" if is_correct else "Sai"
-                points = q.get("score", 0) if is_correct else 0
+            correct_answer_text = ", ".join([str(a) for a in expected])
+            if len(correct_answer_text) > (25 if orientation == 'P' else 40):
+                correct_answer_text = correct_answer_text[:(22 if orientation == 'P' else 37)] + "..."
             
-            # Kiểm tra chiều cao cần thiết cho mỗi ô
-            cell_heights = []
-            
-            # Ước tính chiều cao cho câu hỏi
-            q_lines = len(question_text) // 30 + 1  # Ước tính số dòng
-            q_height = max(7, q_lines * 5)  # Tối thiểu 7mm
-            cell_heights.append(q_height)
-            
-            # Ước tính chiều cao cho đáp án học viên
-            user_lines = len(user_answer_text) // 15 + 1
-            user_height = max(7, user_lines * 5)
-            cell_heights.append(user_height)
-            
-            # Ước tính chiều cao cho đáp án đúng
-            correct_lines = len(correct_answer_text) // 15 + 1
-            correct_height = max(7, correct_lines * 5)
-            cell_heights.append(correct_height)
-            
-            # Chiều cao chung cho dòng này
-            row_height = max(cell_heights)
-            
-            # Lưu vị trí x hiện tại
-            x = pdf.get_x()
-            y = pdf.get_y()
-            
-            # Kiểm tra nếu chiều cao của dòng này sẽ vượt quá trang
-            if y + row_height > pdf.page_break_trigger:
+            # Kiểm tra phần còn lại của trang
+            if pdf.get_y() + 10 > pdf.page_break_trigger:
                 pdf.add_page()
-                y = pdf.get_y()
+                # Vẽ lại header sau khi chuyển trang
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.set_fill_color(240, 240, 240)
+                for i, header in enumerate(headers):
+                    pdf.cell(widths[i], 10, header, 1, 0, 'C', 1)
+                pdf.ln(10)
+                pdf.set_font('Helvetica', '', 9)
             
-            # Vẽ câu hỏi
-            pdf.set_text_color(0, 0, 0)  # Màu đen
-            pdf.set_xy(x, y)
-            pdf.multi_cell(q_width, row_height, question_text, 1, 'L')
+            # Vẽ dữ liệu
+            pdf.cell(q_width, 10, question_text, 1, 0, 'L')
+            pdf.cell(user_width, 10, user_answer_text, 1, 0, 'L')
+            pdf.cell(correct_width, 10, correct_answer_text, 1, 0, 'L')
             
-            # Vẽ đáp án của học viên
-            pdf.set_xy(x + q_width, y)
-            pdf.multi_cell(user_width, row_height, user_answer_text[:60] + "..." if len(user_answer_text) > 60 else user_answer_text, 1, 'L')
-            
-            # Vẽ đáp án đúng/nhận xét
-            pdf.set_xy(x + q_width + user_width, y)
-            pdf.multi_cell(correct_width, row_height, correct_answer_text[:70] + "..." if len(correct_answer_text) > 70 else correct_answer_text, 1, 'L')
-            
-            # Vẽ kết quả với màu tương ứng
-            pdf.set_xy(x + q_width + user_width + correct_width, y)
-            if "Đúng" in result or "Đã chấm điểm" in result:
+            # Đặt màu cho kết quả Đúng/Sai
+            if is_correct:
                 pdf.set_text_color(0, 128, 0)  # Màu xanh lá
-            elif "Sai" in result or "Không trả lời" in result:
+            else:
                 pdf.set_text_color(255, 0, 0)  # Màu đỏ
-            else:  # Trường hợp "Chưa chấm điểm"
-                pdf.set_text_color(255, 140, 0)  # Màu cam
-            pdf.cell(result_width, row_height, result, 1, 0, 'C')
+                
+            pdf.cell(result_width, 10, result, 1, 0, 'C')
             
-            # Vẽ điểm
-            pdf.set_text_color(0, 0, 0)  # Đặt lại màu chữ
-            pdf.set_xy(x + q_width + user_width + correct_width + result_width, y)
-            pdf.cell(points_width, row_height, str(points), 1, 1, 'C')
+            # Đặt lại màu chữ cho điểm
+            pdf.set_text_color(0, 0, 0)  # Màu đen
+            pdf.cell(points_width, 10, str(points), 1, 1, 'C')
         
         pdf.ln(5)
         
         # Tổng kết
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Tổng kết', 0, 1, 'L')
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 10, 'Tong ket', 0, 1, 'L')
         
         # Bảng tổng kết
-        pdf.set_font('DejaVu', '', 10)
+        pdf.set_font('Helvetica', '', 10)
         pdf.set_fill_color(240, 240, 240)
         
         summary_col1 = 50
-        summary_col2 = 140
+        summary_col2 = (190 if orientation == 'P' else 277) - summary_col1
         
-        pdf.cell(summary_col1, 10, 'Số câu đúng', 1, 0, 'L', 1)
-        pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
+        percent_correct = (total_correct/total_questions*100) if total_questions > 0 else 0
+        summary_data = [
+            ['So cau dung', f"{total_correct}/{total_questions}"],
+            ['Diem so', f"{submission.get('score', 0)}/{max_possible}"],
+            ['Ty le dung', f"{percent_correct:.1f}% {'(Dat)' if percent_correct >= 50 else '(Chua dat)'}"]
+        ]
         
-        pdf.cell(summary_col1, 10, 'Điểm số', 1, 0, 'L', 1)
-        pdf.cell(summary_col2, 10, f"{submission.get('score', 0)}/{max_possible}", 1, 1, 'L')
+        for label, value in summary_data:
+            pdf.cell(summary_col1, 10, label, 1, 0, 'L', 1)
+            pdf.cell(summary_col2, 10, value, 1, 1, 'L')
         
-        pdf.cell(summary_col1, 10, 'Tỷ lệ đúng', 1, 0, 'L', 1)
-        percent = total_correct/total_questions*100 if total_questions > 0 else 0
-        pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Đạt)' if percent >= 50 else '(Chưa đạt)'}", 1, 1, 'L')
+        # Thêm chân trang
+        pdf.set_y(-20)
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.cell(0, 10, f'Trang {pdf.page_no()}/{"{nb}"}', 0, 0, 'C')
+        pdf.cell(0, 10, 'He thong Khao sat & Danh gia', 0, 0, 'R')
         
         # Lưu PDF vào buffer
         pdf.output(buffer)
+        
     except Exception as e:
         print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
         traceback.print_exc()
@@ -1119,10 +1119,10 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         try:
             simple_pdf = FPDF()
             simple_pdf.add_page()
-            simple_pdf.set_font('Arial', 'B', 16)
-            simple_pdf.cell(0, 10, f'Báo cáo chi tiết - {student_name}', 0, 1, 'C')
-            simple_pdf.set_font('Arial', '', 10)
-            error_text = f'Không thể hiển thị báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}'
+            simple_pdf.set_font('Helvetica', 'B', 16)
+            simple_pdf.cell(0, 10, f'Bao cao chi tiet - {student_name}', 0, 1, 'C')
+            simple_pdf.set_font('Helvetica', '', 10)
+            error_text = f'Khong the hien thi bao cao chi tiet voi font tieng Viet. Vui long su dung dinh dang DOCX.\nLoi: {str(e)}'
             simple_pdf.multi_cell(0, 10, error_text, 0, 'L')
             simple_pdf.output(buffer)
         except Exception as e2:
@@ -1130,8 +1130,6 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
     
     buffer.seek(0)
     return buffer
-
-
 
 def display_overview_tab(submissions=None, students=None, questions=None, max_possible=0):
     """Hiển thị tab tổng quan"""
@@ -1143,276 +1141,6 @@ def display_overview_tab(submissions=None, students=None, questions=None, max_po
         questions = []
         
     st.subheader("Tổng quan kết quả")
-    
-
-def create_student_report_pdf_fpdf(student_name, student_email, student_class, submission, questions, max_possible):
-    """Tạo báo cáo chi tiết bài làm của học viên dạng PDF sử dụng FPDF2 với hỗ trợ Unicode"""
-    buffer = io.BytesIO()
-    
-    try:
-        # Tạo PDF mới với hỗ trợ Unicode
-        title = f"Báo cáo chi tiết - {student_name}"
-        pdf = create_unicode_pdf(title=title)
-        
-        if pdf is None:
-            raise Exception("Không thể tạo đối tượng PDF")
-        
-        pdf.add_page()
-        
-        # Thiết lập font cho tiêu đề
-        pdf.set_font('DejaVu', 'B', 16)
-        pdf.cell(0, 10, title, 0, 1, 'C')
-        
-        # Thêm thời gian báo cáo
-        pdf.set_font('DejaVu', 'I', 10)
-        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
-        pdf.ln(5)
-        
-        # Tính toán thông tin về bài làm
-        total_correct = 0
-        total_questions = len(questions)
-        
-        # Đảm bảo responses đúng định dạng
-        responses = submission.get("responses", {})
-        if isinstance(responses, str):
-            try:
-                responses = json.loads(responses)
-            except:
-                responses = {}
-        
-        # Xử lý timestamp
-        submission_time = "Không xác định"
-        if isinstance(submission.get("timestamp"), (int, float)):
-            try:
-                submission_time = datetime.fromtimestamp(submission.get("timestamp")).strftime("%H:%M:%S %d/%m/%Y")
-            except:
-                pass
-        else:
-            try:
-                dt = datetime.fromisoformat(submission.get("timestamp", "").replace("Z", "+00:00"))
-                submission_time = dt.strftime("%H:%M:%S %d/%m/%Y")
-            except:
-                pass
-        
-        # Thông tin học viên
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Thông tin học viên', 0, 1, 'L')
-        
-        # Bảng thông tin học viên
-        pdf.set_font('DejaVu', '', 10)
-        info_width = 190
-        col1_width = 50
-        col2_width = info_width - col1_width
-        
-        # Tạo khung thông tin học viên
-        pdf.set_fill_color(240, 240, 240)
-        pdf.cell(col1_width, 10, 'Họ và tên', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_name, 1, 1, 'L')
-        
-        pdf.cell(col1_width, 10, 'Email', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_email, 1, 1, 'L')
-        
-        pdf.cell(col1_width, 10, 'Lớp', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_class, 1, 1, 'L')
-        
-        pdf.cell(col1_width, 10, 'Thời gian nộp', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, submission_time, 1, 1, 'L')
-        
-        pdf.ln(5)
-        
-        # Chi tiết câu trả lời
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Chi tiết câu trả lời', 0, 1, 'L')
-        
-        # Tiêu đề bảng chi tiết
-        pdf.set_font('DejaVu', 'B', 9)
-        pdf.set_fill_color(240, 240, 240)
-        
-        # Xác định độ rộng cột - điều chỉnh phù hợp với nội dung
-        q_width = 80
-        user_width = 35
-        correct_width = 35
-        result_width = 20
-        points_width = 20
-        
-        # Kiểm tra tổng độ rộng cột
-        total_width = q_width + user_width + correct_width + result_width + points_width
-        page_width = 210 - 20  # A4 width - margin
-        
-        # Điều chỉnh nếu vượt quá chiều rộng trang
-        if total_width > page_width:
-            scale = page_width / total_width
-            q_width *= scale
-            user_width *= scale
-            correct_width *= scale
-            result_width *= scale
-            points_width *= scale
-        
-        # Vẽ header bảng
-        pdf.cell(q_width, 10, 'Câu hỏi', 1, 0, 'C', 1)
-        pdf.cell(user_width, 10, 'Đáp án học viên', 1, 0, 'C', 1)
-        pdf.cell(correct_width, 10, 'Đáp án đúng', 1, 0, 'C', 1)
-        pdf.cell(result_width, 10, 'Kết quả', 1, 0, 'C', 1)
-        pdf.cell(points_width, 10, 'Điểm', 1, 1, 'C', 1)
-        
-        # Vẽ dữ liệu câu trả lời
-        pdf.set_font('DejaVu', '', 9)
-        
-        for q in questions:
-            q_id = str(q.get("id", ""))
-            
-            # Đáp án người dùng
-            user_ans = responses.get(q_id, [])
-            
-            # Kiểm tra đúng/sai
-            is_correct = check_answer_correctness(user_ans, q)
-            if is_correct:
-                total_correct += 1
-                points = q.get("score", 0)
-            else:
-                points = 0
-            
-            # Chuẩn bị nội dung dựa trên loại câu hỏi
-            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
-            
-            if q.get("type") == "Essay":
-                # Đối với câu hỏi tự luận
-                essay_answer = user_ans[0] if user_ans else "Không trả lời"
-                user_answer_text = essay_answer
-                correct_answer_text = "Câu hỏi tự luận"
-                result = "Đã trả lời" if is_correct else "Không trả lời"
-            else:
-                # Đối với câu hỏi trắc nghiệm
-                user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
-                
-                # Chuẩn bị đáp án đúng
-                q_correct = q.get("correct", [])
-                q_answers = q.get("answers", [])
-                
-                if isinstance(q_correct, str):
-                    try:
-                        q_correct = json.loads(q_correct)
-                    except:
-                        try:
-                            q_correct = [int(x.strip()) for x in q_correct.split(",")]
-                        except:
-                            q_correct = []
-                
-                if isinstance(q_answers, str):
-                    try:
-                        q_answers = json.loads(q_answers)
-                    except:
-                        q_answers = [q_answers]
-                
-                try:
-                    expected = [q_answers[i - 1] for i in q_correct]
-                except (IndexError, TypeError):
-                    expected = ["Lỗi đáp án"]
-                
-                correct_answer_text = ", ".join([str(a) for a in expected])
-                result = "Đúng" if is_correct else "Sai"
-            
-            # Kiểm tra chiều cao cần thiết cho mỗi ô
-            cell_heights = []
-            
-            # Ước tính chiều cao cho câu hỏi
-            q_lines = len(question_text) // 40 + 1  # Ước tính số dòng
-            q_height = max(7, q_lines * 5)  # Tối thiểu 7mm
-            cell_heights.append(q_height)
-            
-            # Ước tính chiều cao cho đáp án học viên
-            user_lines = len(user_answer_text) // 20 + 1
-            user_height = max(7, user_lines * 5)
-            cell_heights.append(user_height)
-            
-            # Ước tính chiều cao cho đáp án đúng
-            correct_lines = len(correct_answer_text) // 20 + 1
-            correct_height = max(7, correct_lines * 5)
-            cell_heights.append(correct_height)
-            
-            # Chiều cao chung cho dòng này
-            row_height = max(cell_heights)
-            
-            # Lưu vị trí x hiện tại
-            x = pdf.get_x()
-            y = pdf.get_y()
-            
-            # Kiểm tra nếu chiều cao của dòng này sẽ vượt quá trang
-            if y + row_height > pdf.page_break_trigger:
-                pdf.add_page()
-                y = pdf.get_y()
-            
-            # Vẽ câu hỏi
-            pdf.set_text_color(0, 0, 0)  # Màu đen
-            pdf.set_xy(x, y)
-            pdf.multi_cell(q_width, row_height, question_text, 1, 'L')
-            
-            # Vẽ đáp án của học viên
-            pdf.set_xy(x + q_width, y)
-            pdf.cell(user_width, row_height, user_answer_text, 1, 0, 'L')
-            
-            # Vẽ đáp án đúng
-            pdf.set_xy(x + q_width + user_width, y)
-            pdf.cell(correct_width, row_height, correct_answer_text, 1, 0, 'L')
-            
-            # Vẽ kết quả với màu tương ứng
-            pdf.set_xy(x + q_width + user_width + correct_width, y)
-            if is_correct:
-                pdf.set_text_color(0, 128, 0)  # Màu xanh lá
-            else:
-                pdf.set_text_color(255, 0, 0)  # Màu đỏ
-            pdf.cell(result_width, row_height, result, 1, 0, 'C')
-            
-            # Vẽ điểm
-            pdf.set_text_color(0, 0, 0)  # Đặt lại màu chữ
-            pdf.set_xy(x + q_width + user_width + correct_width + result_width, y)
-            pdf.cell(points_width, row_height, str(points), 1, 1, 'C')
-        
-        pdf.ln(5)
-        
-        # Tổng kết
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Tổng kết', 0, 1, 'L')
-        
-        # Bảng tổng kết
-        pdf.set_font('DejaVu', '', 10)
-        pdf.set_fill_color(240, 240, 240)
-        
-        summary_col1 = 50
-        summary_col2 = 140
-        
-        pdf.cell(summary_col1, 10, 'Số câu đúng', 1, 0, 'L', 1)
-        pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
-        
-        pdf.cell(summary_col1, 10, 'Điểm số', 1, 0, 'L', 1)
-        pdf.cell(summary_col2, 10, f"{submission.get('score', 0)}/{max_possible}", 1, 1, 'L')
-        
-        pdf.cell(summary_col1, 10, 'Tỷ lệ đúng', 1, 0, 'L', 1)
-        percent = total_correct/total_questions*100 if total_questions > 0 else 0
-        pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Đạt)' if percent >= 50 else '(Chưa đạt)'}", 1, 1, 'L')
-        
-        # Lưu PDF vào buffer
-        pdf.output(buffer)
-    except Exception as e:
-        print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
-        traceback.print_exc()
-        
-        # Tạo báo cáo đơn giản nếu gặp lỗi
-        try:
-            simple_pdf = FPDF()
-            simple_pdf.add_page()
-            simple_pdf.set_font('Arial', 'B', 16)
-            simple_pdf.cell(0, 10, f'Báo cáo chi tiết - {student_name}', 0, 1, 'C')
-            simple_pdf.set_font('Arial', '', 10)
-            error_text = f'Không thể hiển thị báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}'
-            simple_pdf.multi_cell(0, 10, error_text, 0, 'L')
-            simple_pdf.output(buffer)
-        except Exception as e2:
-            print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
-    
-    buffer.seek(0)
-    return buffer
     
     # Thống kê cơ bản
     total_submissions = len(submissions)
@@ -1770,7 +1498,6 @@ def display_question_tab(submissions=None, questions=None):
         
         question_stats[q_id] = {
             "question": q.get("question", ""),
-            "type": q.get("type", ""),  # Thêm thông tin loại câu hỏi
             "correct": correct_count,
             "wrong": wrong_count,
             "skip": skip_count,
@@ -1783,7 +1510,6 @@ def display_question_tab(submissions=None, questions=None):
         {
             "Câu hỏi ID": q_id,
             "Nội dung": stats["question"],
-            "Loại câu hỏi": stats["type"],  # Thêm cột loại câu hỏi
             "Số lượng đúng": stats["correct"],
             "Số lượng sai": stats["wrong"],
             "Bỏ qua": stats["skip"],
@@ -1799,208 +1525,123 @@ def display_question_tab(submissions=None, questions=None):
     
     df_questions = pd.DataFrame(df_questions_data)
     
-    # Tạo bộ lọc loại câu hỏi
-    question_types = ["Tất cả", "Checkbox", "Combobox", "Essay"]
-    selected_type = st.selectbox("Lọc theo loại câu hỏi:", question_types, key="filter_question_type_tab3")
+    # Vẽ biểu đồ tỷ lệ đúng theo từng câu hỏi
+    q_ids = list(question_stats.keys())
+    correct_rates = [question_stats[q_id]["correct_rate"] * 100 for q_id in q_ids]
     
-    # Áp dụng bộ lọc
-    filtered_df = df_questions
-    if selected_type != "Tất cả":
-        filtered_df = df_questions[df_questions["Loại câu hỏi"] == selected_type]
+    # Giới hạn độ dài câu hỏi để hiển thị trên biểu đồ
+    short_questions = [f"Câu {q_id}: {question_stats[q_id]['question'][:30]}..." for q_id in q_ids]
     
-    # Vẽ biểu đồ tỷ lệ đúng theo từng câu hỏi (chỉ cho các câu hỏi không phải tự luận)
-    non_essay_df = filtered_df[filtered_df["Loại câu hỏi"] != "Essay"] if selected_type == "Tất cả" else filtered_df
+    # Tạo biểu đồ với kích thước nhỏ hơn
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(short_questions, correct_rates, color='skyblue')
     
-    if not non_essay_df.empty:
-        # Tạo dữ liệu cho biểu đồ
-        q_ids = non_essay_df["Câu hỏi ID"].tolist()
-        correct_rates = [float(rate.strip('%')) for rate in non_essay_df["Tỷ lệ đúng (%)"].tolist()]
-        
-        # Giới hạn độ dài câu hỏi để hiển thị trên biểu đồ
-        short_questions = [f"Câu {q_id}: {non_essay_df[non_essay_df['Câu hỏi ID'] == q_id]['Nội dung'].values[0][:30]}..." for q_id in q_ids]
-        
-        # Tạo biểu đồ với kích thước nhỏ hơn
-        fig, ax = plt.subplots(figsize=(10, 6))
-        bars = ax.bar(short_questions, correct_rates, color='skyblue')
-        
-        # Xoay nhãn để tránh chồng chéo
-        plt.xticks(rotation=45, ha='right')
-        
-        # Thêm nhãn giá trị
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + 1,
-                    f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
-        
-        ax.set_ylim(0, 105)  # Giới hạn trục y từ 0-100%
-        ax.set_xlabel("Câu hỏi")
-        ax.set_ylabel("Tỷ lệ đúng (%)")
-        ax.set_title("Tỷ lệ trả lời đúng theo từng câu hỏi")
-        ax.grid(axis='y', linestyle='--', alpha=0.7)
-        fig.set_constrained_layout(True)
-        st.pyplot(fig)
+    # Xoay nhãn để tránh chồng chéo
+    plt.xticks(rotation=45, ha='right')
     
-    # Hiển thị biểu đồ riêng cho câu hỏi Essay nếu đã lọc theo Essay
-    if selected_type == "Essay":
-        st.info("Câu hỏi tự luận được đánh giá dựa trên việc học viên có trả lời hay không.")
-        
-        # Tạo dữ liệu cho biểu đồ tỷ lệ trả lời câu hỏi tự luận
-        essay_df = filtered_df.copy()
-        essay_q_ids = essay_df["Câu hỏi ID"].tolist()
-        
-        if essay_q_ids:
-            # Tạo dữ liệu cho biểu đồ tròn tỷ lệ trả lời
-            answer_rates = []
-            question_texts = []
-            
-            for q_id in essay_q_ids:
-                q_data = essay_df[essay_df["Câu hỏi ID"] == q_id].iloc[0]
-                total = q_data["Tổng số làm"]
-                answered = q_data["Số lượng đúng"]  # Đối với essay, "đúng" nghĩa là "đã trả lời"
-                
-                if total > 0:
-                    answer_rate = (answered / total) * 100
-                else:
-                    answer_rate = 0
-                
-                answer_rates.append(answer_rate)
-                question_texts.append(f"Câu {q_id}: {q_data['Nội dung'][:30]}...")
-            
-            # Vẽ biểu đồ tỷ lệ trả lời cho câu hỏi tự luận
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.bar(question_texts, answer_rates, color='lightgreen')
-            
-            # Xoay nhãn để tránh chồng chéo
-            plt.xticks(rotation=45, ha='right')
-            
-            # Thêm nhãn giá trị
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 1,
-                        f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
-            
-            ax.set_ylim(0, 105)  # Giới hạn trục y từ 0-100%
-            ax.set_xlabel("Câu hỏi tự luận")
-            ax.set_ylabel("Tỷ lệ trả lời (%)")
-            ax.set_title("Tỷ lệ trả lời cho các câu hỏi tự luận")
-            ax.grid(axis='y', linestyle='--', alpha=0.7)
-            fig.set_constrained_layout(True)
-            st.pyplot(fig)
+    # Thêm nhãn giá trị
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
+    
+    ax.set_ylim(0, 105)  # Giới hạn trục y từ 0-100%
+    ax.set_xlabel("Câu hỏi")
+    ax.set_ylabel("Tỷ lệ đúng (%)")
+    ax.set_title("Tỷ lệ trả lời đúng theo từng câu hỏi")
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    fig.set_constrained_layout(True)
+    st.pyplot(fig)
     
     # Hiển thị bảng thống kê
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    st.dataframe(df_questions, use_container_width=True, hide_index=True)
     
     # Chi tiết từng câu hỏi
-    if not filtered_df.empty:
-        selected_question_options = [(f"Câu {row['Câu hỏi ID']}: {row['Nội dung']}") for _, row in filtered_df.iterrows()]
-        if selected_question_options:
-            selected_question = st.selectbox(
-                "Chọn câu hỏi để xem chi tiết:",
-                options=selected_question_options,
-                key="question_select_tab3"
-            )
-            
-            if selected_question:
-                try:
-                    q_id = selected_question.split(":")[0].replace("Câu ", "").strip()
-                    q_data = question_stats[q_id]
-                    q_detail = next((q for q in questions if str(q.get("id", "")) == q_id), None)
+    if q_ids:
+        selected_question = st.selectbox(
+            "Chọn câu hỏi để xem chi tiết:",
+            options=[(f"Câu {q_id}: {question_stats[q_id]['question']}") for q_id in q_ids],
+            key="question_select_tab3"
+        )
+        
+        if selected_question:
+            try:
+                q_id = selected_question.split(":")[0].replace("Câu ", "").strip()
+                q_data = question_stats[q_id]
+                q_detail = next((q for q in questions if str(q.get("id", "")) == q_id), None)
+                
+                if q_detail:
+                    st.write(f"**{selected_question}**")
                     
-                    if q_detail:
-                        st.write(f"**{selected_question}**")
-                        st.write(f"**Loại câu hỏi:** {q_data['type']}")
-                        
-                        # Hiển thị thống kê
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        if q_data['type'] == "Essay":
-                            col1.metric("✍️ Đã trả lời", q_data["correct"])
-                            col2.metric("⏭️ Không trả lời", q_data["skip"] + q_data["wrong"])
-                        else:
-                            col1.metric("✅ Đúng", q_data["correct"])
-                            col2.metric("❌ Sai", q_data["wrong"])
-                            col3.metric("⏭️ Bỏ qua", q_data["skip"])
-                        
-                        col4.metric("📊 Tỷ lệ đúng", f"{q_data['correct_rate']*100:.1f}%")
-                        
-                        # Tạo biểu đồ tròn cho phân phối đáp án
-                        fig, ax = plt.subplots(figsize=(6, 4))
-                        
-                        if q_data['type'] == "Essay":
-                            # Đối với câu hỏi tự luận, chỉ có hai loại: Đã trả lời và Không trả lời
-                            labels = ['Đã trả lời', 'Không trả lời']
-                            sizes = [q_data["correct"], q_data["skip"] + q_data["wrong"]]
-                            colors = ['#4CAF50', '#9E9E9E']
-                        else:
-                            # Đối với câu hỏi trắc nghiệm
-                            labels = ['Đúng', 'Sai', 'Bỏ qua']
-                            sizes = [q_data["correct"], q_data["wrong"], q_data["skip"]]
-                            colors = ['#4CAF50', '#F44336', '#9E9E9E']
-                        
-                        # Chỉ hiển thị phần trăm nếu giá trị > 0
-                        patches, texts, autotexts = ax.pie(
-                            sizes, 
-                            labels=None,  # Không hiển thị nhãn trên biểu đồ
-                            colors=colors, 
-                            autopct=lambda p: f'{p:.1f}%' if p > 0 else '',
-                            startangle=90,
-                            pctdistance=0.85  # Đặt phần trăm gần hơn với trung tâm
-                        )
-                        
-                        # Thiết lập kích thước font nhỏ hơn
-                        for autotext in autotexts:
-                            autotext.set_fontsize(9)
-                        
-                        # Thêm chú thích bên ngoài biểu đồ
-                        ax.legend(labels, loc="upper right", fontsize=9)
-                        
-                        # Vẽ vòng tròn trắng ở giữa
-                        centre_circle = plt.Circle((0, 0), 0.5, fc='white')
-                        ax.add_patch(centre_circle)
-                        
-                        ax.axis('equal')  # Giữ tỷ lệ vòng tròn
-                        fig.set_constrained_layout(True)
-                        st.pyplot(fig)
-                        
-                        # Hiển thị thông tin thêm theo loại câu hỏi
-                        if q_data['type'] == "Essay":
-                            # Đối với câu hỏi tự luận
-                            if q_detail.get("answer_template"):
-                                st.write("**Mẫu câu trả lời:**")
-                                st.text_area("", value=q_detail.get("answer_template", ""), 
-                                            height=150, disabled=True, key=f"view_template_{q_id}")
-                            else:
-                                st.write("**Mẫu câu trả lời:** Không có")
-                        else:
-                            # Đối với câu hỏi trắc nghiệm, hiển thị đáp án đúng
-                            st.write("**Đáp án đúng:**")
-                            
-                            # Chuẩn bị dữ liệu đáp án đúng
-                            q_correct = q_detail.get("correct", [])
-                            q_answers = q_detail.get("answers", [])
-                            
-                            if isinstance(q_correct, str):
-                                try:
-                                    q_correct = json.loads(q_correct)
-                                except:
-                                    try:
-                                        q_correct = [int(x.strip()) for x in q_correct.split(",")]
-                                    except:
-                                        q_correct = []
-                            
-                            if isinstance(q_answers, str):
-                                try:
-                                    q_answers = json.loads(q_answers)
-                                except:
-                                    q_answers = [q_answers]
-                            
+                    # Hiển thị thống kê
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("✅ Đúng", q_data["correct"])
+                    col2.metric("❌ Sai", q_data["wrong"])
+                    col3.metric("⏭️ Bỏ qua", q_data["skip"])
+                    col4.metric("📊 Tỷ lệ đúng", f"{q_data['correct_rate']*100:.1f}%")
+                    
+                    # Tạo biểu đồ tròn nhỏ hơn
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    
+                    # Sử dụng biểu đồ đơn giản với nhãn và tỷ lệ bên ngoài
+                    labels = ['Đúng', 'Sai', 'Bỏ qua']
+                    sizes = [q_data["correct"], q_data["wrong"], q_data["skip"]]
+                    colors = ['#4CAF50', '#F44336', '#9E9E9E']
+                    
+                    # Chỉ hiển thị phần trăm nếu giá trị > 0
+                    patches, texts, autotexts = ax.pie(
+                        sizes, 
+                        labels=None,  # Không hiển thị nhãn trên biểu đồ
+                        colors=colors, 
+                        autopct=lambda p: f'{p:.1f}%' if p > 0 else '',
+                        startangle=90,
+                        pctdistance=0.85  # Đặt phần trăm gần hơn với trung tâm
+                    )
+                    
+                    # Thiết lập kích thước font nhỏ hơn
+                    for autotext in autotexts:
+                        autotext.set_fontsize(9)
+                    
+                    # Thêm chú thích bên ngoài biểu đồ
+                    ax.legend(labels, loc="upper right", fontsize=9)
+                    
+                    # Vẽ vòng tròn trắng ở giữa
+                    centre_circle = plt.Circle((0, 0), 0.5, fc='white')
+                    ax.add_patch(centre_circle)
+                    
+                    ax.axis('equal')  # Giữ tỷ lệ vòng tròn
+                    fig.set_constrained_layout(True)
+                    st.pyplot(fig)
+                    
+                    # Đáp án đúng
+                    st.write("**Đáp án đúng:**")
+                    
+                    # Chuẩn bị dữ liệu đáp án đúng
+                    q_correct = q_detail.get("correct", [])
+                    q_answers = q_detail.get("answers", [])
+                    
+                    if isinstance(q_correct, str):
+                        try:
+                            q_correct = json.loads(q_correct)
+                        except:
                             try:
-                                for i in q_correct:
-                                    st.write(f"- {q_answers[i-1]}")
-                            except (IndexError, TypeError):
-                                st.write("- Lỗi hiển thị đáp án")
-                except Exception as e:
-                    st.error(f"Lỗi khi hiển thị chi tiết câu hỏi: {str(e)}")
+                                q_correct = [int(x.strip()) for x in q_correct.split(",")]
+                            except:
+                                q_correct = []
+                    
+                    if isinstance(q_answers, str):
+                        try:
+                            q_answers = json.loads(q_answers)
+                        except:
+                            q_answers = [q_answers]
+                    
+                    try:
+                        for i in q_correct:
+                            st.write(f"- {q_answers[i-1]}")
+                    except (IndexError, TypeError):
+                        st.write("- Lỗi hiển thị đáp án")
+            except Exception as e:
+                st.error(f"Lỗi khi hiển thị chi tiết câu hỏi: {str(e)}")
     
     return df_questions
 
