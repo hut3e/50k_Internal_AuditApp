@@ -114,6 +114,235 @@ def get_question_by_id(question_id):
     except Exception as e:
         st.error(f"Lỗi khi lấy câu hỏi: {e}")
         return None
+# Thêm hàm này vào file database_helper.py
+
+def update_submission(submission_id, updated_data):
+    """Cập nhật thông tin bài nộp theo ID"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return False
+            
+        # Cập nhật bài nộp trong database
+        result = supabase.table("submissions").update(updated_data).eq("id", submission_id).execute()
+        return True if result.data else False
+    except Exception as e:
+        st.error(f"Lỗi khi cập nhật bài nộp: {e}")
+        return False
+
+def calculate_score(responses, questions, essay_grades=None):
+    """Tính điểm dựa trên đáp án và câu trả lời, bao gồm điểm câu hỏi tự luận"""
+    total_score = 0
+    
+    for q in questions:
+        q_id = str(q["id"])
+        
+        # Nếu là câu hỏi tự luận và có điểm đã chấm
+        if q["type"] == "Essay" and essay_grades and q_id in essay_grades:
+            # Lấy điểm từ essay_grades
+            total_score += essay_grades[q_id]
+        else:
+            # Lấy câu trả lời của học viên
+            student_answers = responses.get(q_id, [])
+            
+            # Kiểm tra đáp án
+            if check_answer_correctness(student_answers, q):
+                total_score += q["score"]
+    
+    return total_score
+
+def check_answer_correctness(student_answers, question):
+    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án và câu hỏi tự luận."""
+    # Nếu câu trả lời trống, không đúng
+    if not student_answers:
+        return False
+        
+    # Đối với câu hỏi tự luận (Essay), luôn đánh giá dựa trên việc có nhập câu trả lời hay không
+    if question["type"] == "Essay":
+        # Chỉ cần học viên nhập nội dung vào ô text là tính đúng (điểm sẽ được chấm thủ công sau)
+        return len(student_answers) > 0 and student_answers[0].strip() != ""
+        
+    # Đối với câu hỏi combobox (chỉ chọn một)
+    if question["type"] == "Combobox":
+        # Nếu có một đáp án và đáp án đó ở vị trí nằm trong danh sách đáp án đúng
+        if len(student_answers) == 1:
+            answer_text = student_answers[0]
+            answer_index = question["answers"].index(answer_text) + 1 if answer_text in question["answers"] else -1
+            return answer_index in question["correct"]
+        return False
+    
+    # Đối với câu hỏi checkbox (nhiều lựa chọn)
+    elif question["type"] == "Checkbox":
+        # Tìm index (vị trí) của các đáp án học viên đã chọn
+        selected_indices = []
+        for ans in student_answers:
+            if ans in question["answers"]:
+                selected_indices.append(question["answers"].index(ans) + 1)
+        
+        # So sánh với danh sách đáp án đúng
+        return set(selected_indices) == set(question["correct"])
+    
+    return False
+
+# Thêm các hàm sau vào file database_helper.py
+
+def create_user_if_not_exists(email, full_name="", class_name="", role="student"):
+    """Tạo người dùng nếu chưa tồn tại trong bảng users"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return False
+            
+        # Kiểm tra xem user đã tồn tại chưa
+        result = supabase.table("users").select("*").eq("email", email).execute()
+        
+        if result.data:
+            # User đã tồn tại, không cần tạo mới
+            return True
+        
+        # Tạo timestamp
+        current_time = datetime.now().isoformat()
+        
+        # Tạo user mới
+        user_data = {
+            "email": email,
+            "full_name": full_name,
+            "class": class_name,
+            "role": role,
+            "registration_date": current_time,
+            "password": "default123"  # Mật khẩu mặc định, nên thay đổi sau
+        }
+        
+        # Thêm vào database
+        result = supabase.table("users").insert(user_data).execute()
+        
+        return True if result.data else False
+    except Exception as e:
+        st.error(f"Lỗi khi tạo người dùng: {e}")
+        return False
+
+def save_submission(email, responses):
+    """Lưu bài làm của học viên và tính điểm"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return None
+            
+        # Tạo user nếu chưa tồn tại
+        create_user_if_not_exists(email)
+            
+        # Lấy danh sách câu hỏi
+        questions = get_all_questions()
+        
+        # Tính điểm dựa trên câu trả lời (không tính điểm câu tự luận lúc này)
+        score = calculate_score(responses, questions)
+        
+        # Tìm id lớn nhất hiện tại
+        try:
+            max_id_result = supabase.table("submissions").select("id").order("id", desc=True).limit(1).execute()
+            if max_id_result.data:
+                new_id = max_id_result.data[0]["id"] + 1
+            else:
+                new_id = 1
+        except Exception as e:
+            st.error(f"Lỗi khi tìm id lớn nhất: {e}")
+            new_id = 1
+        
+        # Tạo timestamp đúng định dạng ISO cho PostgreSQL
+        current_time = datetime.now().isoformat()
+        
+        # Dữ liệu cần lưu
+        submission_data = {
+            "id": new_id,
+            "user_email": email,
+            "responses": json.dumps(responses),
+            "score": score,
+            "timestamp": current_time,  # Sử dụng ISO format thay vì Unix timestamp
+            "essay_grades": json.dumps({}),  # Thêm trường lưu điểm câu hỏi tự luận
+            "essay_comments": json.dumps({})  # Thêm trường lưu nhận xét câu hỏi tự luận
+        }
+        
+        # Lưu vào database
+        result = supabase.table("submissions").insert(submission_data).execute()
+        
+        if result.data:
+            # Trả về kết quả bài làm
+            return {
+                "id": new_id,
+                "user_email": email,
+                "responses": responses,
+                "score": score,
+                "timestamp": current_time,
+                "essay_grades": {},
+                "essay_comments": {}
+            }
+        
+        return None
+    except Exception as e:
+        st.error(f"Lỗi khi lưu bài làm: {e}")
+        return None
+
+def save_submission(email, responses):
+    """Lưu bài làm của học viên và tính điểm"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return None
+            
+        # Lấy danh sách câu hỏi
+        questions = get_all_questions()
+        
+        # Tính điểm dựa trên câu trả lời (không tính điểm câu tự luận lúc này)
+        score = calculate_score(responses, questions)
+        
+        # Tìm id lớn nhất hiện tại
+        try:
+            max_id_result = supabase.table("submissions").select("id").order("id", desc=True).limit(1).execute()
+            if max_id_result.data:
+                new_id = max_id_result.data[0]["id"] + 1
+            else:
+                new_id = 1
+        except Exception as e:
+            st.error(f"Lỗi khi tìm id lớn nhất: {e}")
+            new_id = 1
+        
+        # Tạo timestamp đúng định dạng ISO cho PostgreSQL
+        current_time = datetime.now().isoformat()
+        
+        # Dữ liệu cần lưu
+        submission_data = {
+            "id": new_id,
+            "user_email": email,
+            "responses": json.dumps(responses),
+            "score": score,
+            "timestamp": current_time,  # Sử dụng ISO format thay vì Unix timestamp
+            "essay_grades": json.dumps({}),  # Thêm trường lưu điểm câu hỏi tự luận
+            "essay_comments": json.dumps({})  # Thêm trường lưu nhận xét câu hỏi tự luận
+        }
+        
+        # Lưu vào database
+        result = supabase.table("submissions").insert(submission_data).execute()
+        
+        if result.data:
+            # Trả về kết quả bài làm
+            return {
+                "id": new_id,
+                "user_email": email,
+                "responses": responses,
+                "score": score,
+                "timestamp": current_time,
+                "essay_grades": {},
+                "essay_comments": {}
+            }
+        
+        return None
+    except Exception as e:
+        st.error(f"Lỗi khi lưu bài làm: {e}")
+        return None
 
 def save_question(question_data):
     """Lưu câu hỏi mới vào database"""
