@@ -285,6 +285,46 @@ def save_submission(email, responses):
         st.error(f"Lỗi khi lưu bài làm: {e}")
         return None
 
+def register_user(email, password, full_name, class_name, role="student"):
+    """Đăng ký người dùng mới"""
+    try:
+        # Lấy Supabase client
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return False, "Không thể kết nối đến cơ sở dữ liệu."
+        
+        # Kiểm tra xem email đã tồn tại chưa
+        user_check = supabase.table('users').select('*').eq('email', email).execute()
+        if user_check.data:
+            return False, "Email này đã được sử dụng. Vui lòng chọn email khác hoặc đăng nhập."
+        
+        # Tạo timestamp đúng định dạng ISO cho PostgreSQL
+        registration_date = datetime.now().isoformat()
+        
+        # Chuẩn bị dữ liệu người dùng
+        user_data = {
+            "email": email,
+            "password": password,  # Lưu ý: trong ứng dụng thực tế, nên mã hóa mật khẩu trước khi lưu
+            "full_name": full_name,
+            "class": class_name,
+            "role": role,
+            "first_login": True,
+            "registration_date": registration_date
+        }
+        
+        # Lưu vào database
+        result = supabase.table('users').insert(user_data).execute()
+        
+        if result.data:
+            return True, "Đăng ký thành công. Bạn có thể đăng nhập ngay bây giờ."
+        else:
+            return False, "Có lỗi xảy ra khi đăng ký. Vui lòng thử lại sau."
+    except Exception as e:
+        print(f"Lỗi đăng ký người dùng: {e}")
+        st.error(f"Lỗi đăng ký người dùng: {e}")
+        return False, f"Lỗi: {str(e)}"
+        
 def save_submission(email, responses):
     """Lưu bài làm của học viên và tính điểm"""
     try:
