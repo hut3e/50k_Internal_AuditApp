@@ -708,7 +708,25 @@ def get_submission_statistics():
     except Exception as e:
         st.error(f"Lỗi khi lấy thống kê bài nộp: {e}")
         return None
-    
+def check_email_exists(email):
+    """Kiểm tra xem email đã tồn tại trong hệ thống hay chưa"""
+    try:
+        # Lấy Supabase client
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return True, "Không thể kết nối đến cơ sở dữ liệu."
+        
+        # Kiểm tra email
+        result = supabase.table('users').select('*').eq('email', email).execute()
+        
+        # Trả về True nếu email đã tồn tại
+        return len(result.data) > 0, "Email đã tồn tại" if len(result.data) > 0 else "Email chưa tồn tại"
+    except Exception as e:
+        print(f"Lỗi kiểm tra email: {e}")
+        st.error(f"Lỗi kiểm tra email: {e}")
+        return True, f"Lỗi: {str(e)}"  # Trả về True để ngăn đăng ký trong trường hợp có lỗi
+        
 def get_all_users(role=None):
     """Lấy danh sách tất cả người dùng, có thể lọc theo vai trò"""
     try:
