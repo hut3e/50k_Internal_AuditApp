@@ -15,7 +15,13 @@ from question_manager import manage_questions
 from surveyhandler import survey_form
 from stats_dashboard import stats_dashboard
 from admin_dashboard import admin_dashboard
-from database_helper import get_supabase_client, check_supabase_config
+from database_helper import (
+    get_supabase_client, 
+    check_supabase_config, 
+    get_user, 
+    register_user, 
+    check_email_exists
+)
 from PIL import Image, UnidentifiedImageError
 
 # ------------ Cấu hình logo 2×3 cm ~ 76×113 px ------------
