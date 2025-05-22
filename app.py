@@ -17,7 +17,8 @@ from stats_dashboard import stats_dashboard
 from admin_dashboard import admin_dashboard
 from database_helper import (
     get_supabase_client, 
-    check_supabase_config, 
+    check_supabase_config,
+    check_email_exists,
     get_user
 )
 from PIL import Image, UnidentifiedImageError
