@@ -184,43 +184,98 @@ def main():
         
         # Nếu chưa đăng nhập
         if not st.session_state.user_role:
-            with st.form("login_form"):
-                st.subheader("Đăng nhập")
-                email = st.text_input("Email", placeholder="Nhập email của bạn")
-                password = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu")
-                
-                # Thêm combobox cho loại người dùng (chỉ cho mục đích demo)
-                user_type = st.selectbox("Loại tài khoản", ["Học viên", "Quản trị viên"])
-                
-                submit_button = st.form_submit_button("Đăng nhập")
-                
-                if submit_button:
-                    # Trong ứng dụng thực tế sẽ có xác thực đúng mật khẩu
-                    # Đây chỉ là demo đơn giản
-                    if email and password:
-                        if user_type == "Quản trị viên":
-                            st.session_state.user_role = "admin"
-                            st.session_state.user_info = {
-                                "email": email,
-                                "full_name": "Admin",
-                                "class_name": "N/A"
-                            }
+            # Tabs cho đăng nhập và đăng ký
+            tab1, tab2 = st.tabs(["Đăng nhập", "Đăng ký"])
+            
+            # Tab đăng nhập
+            with tab1:
+                with st.form("login_form"):
+                    st.subheader("Đăng nhập")
+                    email = st.text_input("Email", placeholder="Nhập email của bạn")
+                    password = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu")
+                    
+                    # Thêm combobox cho loại người dùng (chỉ cho mục đích demo)
+                    user_type = st.selectbox("Loại tài khoản", ["Học viên", "Quản trị viên"])
+                    
+                    submit_button = st.form_submit_button("Đăng nhập")
+                    
+                    if submit_button:
+                        if not email or not password:
+                            st.error("Vui lòng nhập email và mật khẩu!")
                         else:
-                            st.session_state.user_role = "student"
-                            st.session_state.user_info = {
-                                "email": email,
-                                "full_name": "Học viên " + email.split("@")[0],
-                                "class_name": "Lớp đào tạo đánh giá viên nội bộ ISO 50001:2018"
-                            }
-                        
-                        st.success("Đăng nhập thành công!")
-                        st.rerun()
-                    else:
-                        st.error("Vui lòng nhập email và mật khẩu!")
+                            # Thử đăng nhập với Supabase
+                            user_info = get_user(email, password)
+                            
+                            if user_info:
+                                # Sử dụng thông tin từ Supabase
+                                st.session_state.user_role = user_info.get("role", "student")
+                                st.session_state.user_info = {
+                                    "email": user_info.get("email", email),
+                                    "full_name": user_info.get("full_name", "Học viên"),
+                                    "class_name": user_info.get("class", "Lớp đào tạo")
+                                }
+                                st.success("Đăng nhập thành công!")
+                                st.rerun()
+                            else:
+                                # Mục đích demo - vẫn cho phép đăng nhập với vai trò đã chọn
+                                if user_type == "Quản trị viên":
+                                    st.session_state.user_role = "admin"
+                                    st.session_state.user_info = {
+                                        "email": email,
+                                        "full_name": "Admin",
+                                        "class_name": "N/A"
+                                    }
+                                else:
+                                    st.session_state.user_role = "student"
+                                    st.session_state.user_info = {
+                                        "email": email,
+                                        "full_name": "Học viên " + email.split("@")[0],
+                                        "class_name": "Lớp đào tạo"
+                                    }
+                                
+                                st.success("Đăng nhập thành công!")
+                                st.rerun()
+            
+            # Tab đăng ký
+            with tab2:
+                with st.form("registration_form"):
+                    st.subheader("Đăng ký tài khoản mới")
+                    reg_email = st.text_input("Email", placeholder="Nhập email của bạn", key="reg_email")
+                    reg_password = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu", key="reg_password")
+                    confirm_password = st.text_input("Nhập lại mật khẩu", type="password", placeholder="Xác nhận mật khẩu")
+                    full_name = st.text_input("Họ và tên", placeholder="Nhập họ và tên đầy đủ")
+                    class_name = st.text_input("Lớp", placeholder="Nhập tên lớp/khóa học")
+                    
+                    # Loại tài khoản (mặc định là Học viên)
+                    account_type = st.selectbox("Loại tài khoản", ["Học viên", "Quản trị viên"])
+                    role = "admin" if account_type == "Quản trị viên" else "student"
+                    
+                    register_button = st.form_submit_button("Đăng ký")
+                    
+                    if register_button:
+                        # Kiểm tra các trường thông tin
+                        if not reg_email or not reg_password or not confirm_password or not full_name:
+                            st.error("Vui lòng điền đầy đủ thông tin bắt buộc.")
+                        elif reg_password != confirm_password:
+                            st.error("Mật khẩu nhập lại không khớp.")
+                        else:
+                            # Kiểm tra email đã tồn tại chưa
+                            email_exists, message = check_email_exists(reg_email)
+                            
+                            if email_exists:
+                                st.error("Email này đã được sử dụng. Vui lòng chọn email khác.")
+                            else:
+                                # Đăng ký người dùng mới
+                                success, message = register_user(reg_email, reg_password, full_name, class_name, role)
+                                if success:
+                                    st.success(message)
+                                    st.info("Vui lòng đăng nhập để tiếp tục.")
+                                else:
+                                    st.error(message)
         
         # Đã đăng nhập - Hiển thị menu tương ứng
         else:
-            st.write(f"Chào mừng, **{st.session_state.user_info['full_name']}**!")
+            st.write(f"Chào mừng bạn tham dự, **{st.session_state.user_info['full_name']}**!")
             
             # Menu cho quản trị viên
             if st.session_state.user_role == "admin":
