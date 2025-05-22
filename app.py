@@ -19,7 +19,6 @@ from database_helper import (
     get_supabase_client, 
     check_supabase_config, 
     get_user, 
-    register_user, 
     check_email_exists
 )
 from PIL import Image, UnidentifiedImageError
