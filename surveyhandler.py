@@ -287,8 +287,8 @@ def display_submission_details(submission, questions, max_score):
             st.info(f"""
             **Lưu ý về câu hỏi tự luận:**
             - Bài làm của bạn có {essay_count} câu hỏi tự luận.
-            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm thủ công.
-            - Điểm số hiện tại có thể chưa bao gồm điểm của các câu hỏi tự luận.
+            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm theo tự luận.
+            - Điểm số hiện tại của Học viên chưa bao gồm điểm của các câu hỏi tự luận.
             - Vui lòng kiểm tra lại sau.
             """)
         
@@ -365,7 +365,7 @@ def display_submission_details(submission, questions, max_score):
                         if q_id in essay_comments and essay_comments[q_id]:
                             st.info(f"**Nhận xét:** {essay_comments[q_id]}")
                     else:
-                        st.warning("⏳ Chưa được chấm điểm - Vui lòng kiểm tra lại sau")
+                        st.warning("⏳ Phần tự luận Ban tổ chức sẽ chấm điểm - Vui lòng kiểm tra lại sau")
                 else:
                     # Đối với câu hỏi trắc nghiệm, hiển thị các đáp án
                     # Đáp án đúng
@@ -515,7 +515,7 @@ def display_submission_history(submissions, questions, max_score):
                         if q_id in essay_comments and essay_comments[q_id]:
                             st.info(f"**Nhận xét:** {essay_comments[q_id]}")
                     else:
-                        st.warning("⏳ Chưa được chấm điểm")
+                        st.warning("⏳ Phần tự luận Ban tổ chức sẽ thực hiện chấm điểm")
                 else:
                     # Hiển thị đáp án của câu hỏi trắc nghiệm
                     st.write("Đáp án đã chọn:")
