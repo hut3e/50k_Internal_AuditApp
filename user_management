@@ -1,0 +1,242 @@
+import streamlit as st
+import json
+from datetime import datetime
+from database_helper import get_supabase_client
+
+def user_registration_interface():
+    """Interface đăng ký người dùng mới"""
+    st.title("👥 Đăng ký người dùng")
+    
+    # Tabs cho đăng ký và quản lý
+    tab1, tab2 = st.tabs(["Đăng ký mới", "Quản lý người dùng"])
+    
+    with tab1:
+        register_new_user()
+    
+    with tab2:
+        manage_users()
+
+def register_new_user():
+    """Form đăng ký người dùng mới"""
+    st.subheader("Đăng ký người dùng mới")
+    
+    with st.form("registration_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            email = st.text_input("Email *", placeholder="user@example.com")
+            full_name = st.text_input("Họ và tên *", placeholder="Nguyễn Văn A")
+            role = st.selectbox("Vai trò *", ["student", "teacher"])
+            
+        with col2:
+            password = st.text_input("Mật khẩu *", type="password", placeholder="Nhập mật khẩu")
+            class_name = st.text_input("Lớp/Khoa", placeholder="Lớp 12A1")
+            phone = st.text_input("Số điện thoại", placeholder="0123456789")
+        
+        # Thêm các trường bổ sung
+        student_id = st.text_input("Mã học viên/giảng viên", placeholder="SV001")
+        address = st.text_area("Địa chỉ", height=100)
+        
+        submitted = st.form_submit_button("📝 Đăng ký", use_container_width=True)
+        
+        if submitted:
+            # Validate dữ liệu
+            if not email or not full_name or not password:
+                st.error("Vui lòng điền đầy đủ các trường bắt buộc (*)")
+                return
+                
+            if not is_valid_email(email):
+                st.error("Email không hợp lệ")
+                return
+                
+            if len(password) < 6:
+                st.error("Mật khẩu phải có ít nhất 6 ký tự")
+                return
+            
+            # Tạo người dùng mới
+            success, message = create_new_user({
+                "email": email,
+                "full_name": full_name,
+                "role": role,
+                "password": password,
+                "class": class_name,
+                "phone": phone,
+                "student_id": student_id,
+                "address": address
+            })
+            
+            if success:
+                st.success(f"✅ Đăng ký thành công! {message}")
+                st.balloons()
+            else:
+                st.error(f"❌ Đăng ký thất bại: {message}")
+
+def manage_users():
+    """Quản lý người dùng hiện có"""
+    st.subheader("Quản lý người dùng")
+    
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến database")
+            return
+            
+        # Lấy danh sách người dùng
+        result = supabase.table("users").select("*").execute()
+        users = result.data if result.data else []
+        
+        if not users:
+            st.info("Chưa có người dùng nào trong hệ thống")
+            return
+        
+        # Bộ lọc
+        col1, col2 = st.columns(2)
+        with col1:
+            role_filter = st.selectbox("Lọc theo vai trò:", ["Tất cả", "student", "teacher"])
+        with col2:
+            search_term = st.text_input("Tìm kiếm:", placeholder="Nhập tên hoặc email")
+        
+        # Lọc người dùng
+        filtered_users = users
+        if role_filter != "Tất cả":
+            filtered_users = [u for u in filtered_users if u.get("role") == role_filter]
+        
+        if search_term:
+            filtered_users = [u for u in filtered_users 
+                            if search_term.lower() in u.get("full_name", "").lower() 
+                            or search_term.lower() in u.get("email", "").lower()]
+        
+        # Hiển thị danh sách
+        st.write(f"**Tổng số người dùng:** {len(filtered_users)}")
+        
+        for user in filtered_users:
+            with st.expander(f"{'👨‍🏫' if user.get('role') == 'teacher' else '👨‍🎓'} {user.get('full_name', '')} - {user.get('email', '')}"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write(f"**Email:** {user.get('email', '')}")
+                    st.write(f"**Vai trò:** {user.get('role', '')}")
+                    st.write(f"**Lớp/Khoa:** {user.get('class', 'Không có')}")
+                    
+                with col2:
+                    st.write(f"**Mã số:** {user.get('student_id', 'Không có')}")
+                    st.write(f"**Điện thoại:** {user.get('phone', 'Không có')}")
+                    reg_date = user.get('registration_date', '')
+                    if reg_date:
+                        try:
+                            dt = datetime.fromisoformat(reg_date.replace("Z", "+00:00"))
+                            formatted_date = dt.strftime("%d/%m/%Y")
+                        except:
+                            formatted_date = reg_date
+                        st.write(f"**Ngày đăng ký:** {formatted_date}")
+                
+                if user.get('address'):
+                    st.write(f"**Địa chỉ:** {user.get('address')}")
+                
+                # Nút hành động
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(f"✏️ Sửa", key=f"edit_{user.get('email')}"):
+                        st.session_state[f"editing_{user.get('email')}"] = True
+                        
+                with col2:
+                    if st.button(f"🗑️ Xóa", key=f"delete_{user.get('email')}"):
+                        if delete_user(user.get('email')):
+                            st.success("Đã xóa người dùng")
+                            st.rerun()
+                        else:
+                            st.error("Không thể xóa người dùng")
+                
+                # Form chỉnh sửa
+                if st.session_state.get(f"editing_{user.get('email')}", False):
+                    with st.form(f"edit_form_{user.get('email')}"):
+                        st.write("**Chỉnh sửa thông tin:**")
+                        
+                        new_name = st.text_input("Họ và tên:", value=user.get('full_name', ''))
+                        new_class = st.text_input("Lớp/Khoa:", value=user.get('class', ''))
+                        new_phone = st.text_input("Điện thoại:", value=user.get('phone', ''))
+                        new_address = st.text_area("Địa chỉ:", value=user.get('address', ''))
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.form_submit_button("💾 Lưu"):
+                                if update_user(user.get('email'), {
+                                    "full_name": new_name,
+                                    "class": new_class,
+                                    "phone": new_phone,
+                                    "address": new_address
+                                }):
+                                    st.success("Đã cập nhật thông tin")
+                                    del st.session_state[f"editing_{user.get('email')}"]
+                                    st.rerun()
+                                else:
+                                    st.error("Không thể cập nhật")
+                        
+                        with col2:
+                            if st.form_submit_button("❌ Hủy"):
+                                del st.session_state[f"editing_{user.get('email')}"]
+                                st.rerun()
+                                
+    except Exception as e:
+        st.error(f"Có lỗi xảy ra: {str(e)}")
+
+def create_new_user(user_data):
+    """Tạo người dùng mới trong database"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return False, "Không thể kết nối đến database"
+        
+        # Kiểm tra email đã tồn tại
+        existing_result = supabase.table("users").select("email").eq("email", user_data["email"]).execute()
+        if existing_result.data:
+            return False, "Email đã được sử dụng"
+        
+        # Thêm thông tin bổ sung
+        user_data["registration_date"] = datetime.now().isoformat()
+        user_data["first_login"] = True
+        
+        # Lưu vào database
+        result = supabase.table("users").insert(user_data).execute()
+        
+        if result.data:
+            return True, f"Đã tạo tài khoản cho {user_data['full_name']}"
+        else:
+            return False, "Không thể tạo tài khoản"
+            
+    except Exception as e:
+        return False, f"Lỗi: {str(e)}"
+
+def update_user(email, updated_data):
+    """Cập nhật thông tin người dùng"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return False
+        
+        result = supabase.table("users").update(updated_data).eq("email", email).execute()
+        return True if result.data else False
+        
+    except Exception as e:
+        print(f"Lỗi khi cập nhật người dùng: {str(e)}")
+        return False
+
+def delete_user(email):
+    """Xóa người dùng"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return False
+        
+        result = supabase.table("users").delete().eq("email", email).execute()
+        return True if result.data else False
+        
+    except Exception as e:
+        print(f"Lỗi khi xóa người dùng: {str(e)}")
+        return False
+
+def is_valid_email(email):
+    """Kiểm tra định dạng email"""
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
