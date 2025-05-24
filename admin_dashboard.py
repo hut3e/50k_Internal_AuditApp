@@ -345,32 +345,42 @@ def export_statistics():
     st.info("Trong triển khai thực tế, tính năng này sẽ cho phép xuất báo cáo tổng hợp bao gồm các biểu đồ và phân tích.")
 
 def check_answer_correctness(student_answers, question):
-    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án."""
-    # Nếu câu trả lời trống, không đúng
-    if not student_answers:
-        return False
+    """Import từ database_helper để tránh duplicate code"""
+    from database_helper import check_answer_correctness as db_check
+    return db_check(student_answers, question)
+
+# Thêm hàm tính lại điểm cho admin:
+def recalculate_submission_score(submission_id):
+    """Tính lại điểm cho một bài nộp cụ thể"""
+    try:
+        from database_helper import get_supabase_client, get_all_questions, calculate_total_score
         
-    # Đối với câu hỏi combobox (chỉ chọn một)
-    if question["type"] == "Combobox":
-        # Nếu có một đáp án và đáp án đó ở vị trí nằm trong danh sách đáp án đúng
-        if len(student_answers) == 1:
-            answer_text = student_answers[0]
-            answer_index = question["answers"].index(answer_text) + 1 if answer_text in question["answers"] else -1
-            return answer_index in question["correct"]
-        return False
-    
-    # Đối với câu hỏi checkbox (nhiều lựa chọn)
-    elif question["type"] == "Checkbox":
-        # Tìm index (vị trí) của các đáp án học viên đã chọn
-        selected_indices = []
-        for ans in student_answers:
-            if ans in question["answers"]:
-                selected_indices.append(question["answers"].index(ans) + 1)
+        supabase = get_supabase_client()
+        if not supabase:
+            return False
+            
+        # Lấy thông tin bài nộp
+        result = supabase.table("submissions").select("*").eq("id", submission_id).execute()
+        if not result.data:
+            return False
+            
+        submission = result.data[0]
+        questions = get_all_questions()
         
-        # So sánh với danh sách đáp án đúng
-        return set(selected_indices) == set(question["correct"])
-    
-    return False
+        # Tính lại tổng điểm
+        new_total_score = calculate_total_score(submission, questions)
+        
+        # Cập nhật điểm mới
+        update_result = supabase.table("submissions").update({
+            "score": new_total_score
+        }).eq("id", submission_id).execute()
+        
+        return True if update_result.data else False
+        
+    except Exception as e:
+        print(f"Lỗi khi tính lại điểm: {str(e)}")
+        return False
+
 
 def display_student_tab(submissions=None, students=None, questions=None, max_possible=0):
     """Hiển thị tab theo học viên"""
