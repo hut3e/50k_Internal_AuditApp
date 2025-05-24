@@ -54,10 +54,10 @@ def survey_form(email, full_name, class_name):
         st.write(f"**Số lần đã làm bài:** {submission_count}/{MAX_ATTEMPTS}")
         
         # Hiển thị điểm cao nhất đã đạt được
-        max_score = max([s["score"] for s in user_submissions])
-        max_possible = sum([q["score"] for q in questions])
+        #max_score = max([s["score"] for s in user_submissions])
+        #max_possible = sum([q["score"] for q in questions])
         
-        st.write(f"**Điểm cao nhất đã đạt được:** {max_score}/{max_possible} ({(max_score/max_possible*100):.1f}%)")
+        #st.write(f"**Điểm cao nhất đã đạt được:** {max_score}/{max_possible} ({(max_score/max_possible*100):.1f}%)")
     else:
         st.write(f"**Đây là lần làm bài đầu tiên của bạn**")
     
@@ -72,8 +72,8 @@ def survey_form(email, full_name, class_name):
         st.error("⚠️ Bạn đã sử dụng hết số lần làm bài cho phép (tối đa 3 lần).")
         
         # Hiển thị các lần làm bài trước đó
-        if st.checkbox("Xem lịch sử các lần làm bài", key="view_history_checkbox"):
-            display_submission_history(user_submissions, questions, max_score)
+        #if st.checkbox("Xem lịch sử các lần làm bài", key="view_history_checkbox"):
+            #display_submission_history(user_submissions, questions, max_score)
         
         return
     
@@ -287,21 +287,21 @@ def display_submission_details(submission, questions, max_score):
             st.info(f"""
             **Lưu ý về câu hỏi tự luận:**
             - Bài làm của bạn có {essay_count} câu hỏi tự luận.
-            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm theo tự luận.
-            - Điểm số hiện tại của Học viên chưa bao gồm điểm của các câu hỏi tự luận.
+            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm thủ công.
+            - Điểm số hiện tại có thể chưa bao gồm điểm của các câu hỏi tự luận.
             - Vui lòng kiểm tra lại sau.
             """)
         
         # Hiển thị dạng biểu đồ đơn giản
-        st.subheader("Thống kê kết quả")
+        st.subheader("Thống kê kết quả làm bài")
         
         col1, col2 = st.columns(2)
-        col1.metric("Câu trả lời đúng", f"{correct_count}/{len(questions)}")
-        col2.metric("Câu trả lời sai", f"{incorrect_count}/{len(questions)}")
+        col1.metric("Câu hỏi đã làm", f"{correct_count}/{len(questions)}")
+        col2.metric("Câu hỏi chưa làm", f"{incorrect_count}/{len(questions)}")
         
         # Tạo progress bar hiển thị tỷ lệ đúng/sai
         st.progress(correct_count / len(questions))
-        st.caption(f"Tỷ lệ câu trả lời đúng: {(correct_count / len(questions) * 100):.1f}%")
+        st.caption(f"Tỷ lệ câu đã trả lời: {(correct_count / len(questions) * 100):.1f}%")
     
     with tab_details:
         st.subheader("Chi tiết câu trả lời")
@@ -365,7 +365,7 @@ def display_submission_details(submission, questions, max_score):
                         if q_id in essay_comments and essay_comments[q_id]:
                             st.info(f"**Nhận xét:** {essay_comments[q_id]}")
                     else:
-                        st.warning("⏳ Phần tự luận Ban tổ chức sẽ chấm điểm - Vui lòng kiểm tra lại sau")
+                        st.warning("⏳ Chưa được chấm điểm - Vui lòng kiểm tra lại sau")
                 else:
                     # Đối với câu hỏi trắc nghiệm, hiển thị các đáp án
                     # Đáp án đúng
@@ -515,7 +515,7 @@ def display_submission_history(submissions, questions, max_score):
                         if q_id in essay_comments and essay_comments[q_id]:
                             st.info(f"**Nhận xét:** {essay_comments[q_id]}")
                     else:
-                        st.warning("⏳ Phần tự luận Ban tổ chức sẽ thực hiện chấm điểm")
+                        st.warning("⏳ Ban tổ chức sẽ chấm điểm và thông tin kết quả")
                 else:
                     # Hiển thị đáp án của câu hỏi trắc nghiệm
                     st.write("Đáp án đã chọn:")
