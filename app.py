@@ -110,7 +110,7 @@ def display_logos():
                 st.error(f"Lỗi khi hiển thị logo {logo_path}: {e}")
         
         # Hiển thị tiêu đề ứng dụng ở giữa
-        st.title("ISO 50001:2018 TRAINING INTERNAL AUDIT APP")
+        st.title("ISO 50001:2018 TRAINING APP")
     
     # Phần tải lên logo mới - ẩn trong expander để không chiếm nhiều không gian
     with st.expander("Cấu hình logo"):
@@ -737,7 +737,7 @@ def essay_grading_interface():
 
 def display_welcome_screen():
     """Hiển thị màn hình chào mừng"""
-    st.header("🎯 Chào mừng các Bạn học viên khóa Đào tạo đánh giá viên nội bộ ISO 50001:2018!")
+    st.header("🎯 Chào mừng Học viên Tổng Công ty Giấy tham gia khóa Đào tạo nhận thức ISO 50001:2018!")
     
     st.markdown("""
     ### 🚀 Tính năng chính:
@@ -790,7 +790,7 @@ def display_welcome_screen():
 def setup_sidebar():
     """Thiết lập sidebar với menu điều hướng"""
     with st.sidebar:
-        st.title("🎯 Hệ thống kiểm tra sau Đào tạo đánh giá viên nội bộ ISO 50001:2018")
+        st.title("🎯 Hệ thống kiểm tra sau Đào tạo ISO 50001:2018")
         
         # Kiểm tra cấu hình Supabase
         is_valid, message = check_supabase_config()
@@ -864,7 +864,7 @@ def main():
     """Hàm main chính của ứng dụng"""
     # Cấu hình trang
     st.set_page_config(
-        page_title="Hệ thống kiểm tra học viên sau Đào tạo đánh giá viên nội bộ ISO 50001:2018",
+        page_title="Hệ thống kiểm tra học viên sau Đào tạo tiêu chuẩn ISO 50001:2018",
         page_icon="🎯",
         layout="wide",
         initial_sidebar_state="expanded"
