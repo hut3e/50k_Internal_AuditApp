@@ -737,7 +737,7 @@ def essay_grading_interface():
 
 def display_welcome_screen():
     """Hiển thị màn hình chào mừng"""
-    st.header("🎯 Chào mừng Học viên Tổng Công ty Giấy tham gia khóa Đào tạo nhận thức ISO 50001:2018!")
+    st.header("🎯 Chào mừng Các Anh/Chị Công tác tại VINASOY tham gia khóa Đào tạo nhận thức ISO 50001:2018!")
     
     st.markdown("""
     ### 🚀 Tính năng chính:
