@@ -737,7 +737,7 @@ def essay_grading_interface():
 
 def display_welcome_screen():
     """Hiển thị màn hình chào mừng"""
-    st.header("🎯 Chào mừng Các Anh/Chị Công tác tại VINASOY tham gia khóa Đào tạo nhận thức ISO 50001:2018!")
+    st.header("🎯 Chào mừng Các Anh/Chị Công tác tại Karcher tham gia khóa Đào tạo nhận thức ISO 50001:2018!")
     
     st.markdown("""
     ### 🚀 Tính năng chính:
@@ -758,7 +758,7 @@ def display_welcome_screen():
     """)
     
     # Hiển thị một số thông tin demo
-    with st.expander("ℹ️ Thông tin App kiểm tra sau Đào tạo ISO 50001:2018"):
+    with st.expander("ℹ️ Thông tin App Đào tạo ISO 50001:2018"):
         st.write("""
         **🎯 Đây là phiên bản App Ver 2.0 của Team ISO 50001**
         
@@ -790,7 +790,7 @@ def display_welcome_screen():
 def setup_sidebar():
     """Thiết lập sidebar với menu điều hướng"""
     with st.sidebar:
-        st.title("🎯 Hệ thống kiểm tra sau Đào tạo ISO 50001:2018")
+        st.title("🎯 Hệ thống kiểm tra Học viên Công ty Karcher theo khóa Đào tạo ISO 50001:2018")
         
         # Kiểm tra cấu hình Supabase
         is_valid, message = check_supabase_config()
@@ -864,7 +864,7 @@ def main():
     """Hàm main chính của ứng dụng"""
     # Cấu hình trang
     st.set_page_config(
-        page_title="Hệ thống kiểm tra học viên sau Đào tạo tiêu chuẩn ISO 50001:2018",
+        page_title="Hệ thống kiểm tra học viên tham gia Đào tạo tiêu chuẩn ISO 50001:2018",
         page_icon="🎯",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -919,3 +919,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
