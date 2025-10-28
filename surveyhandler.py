@@ -42,11 +42,21 @@ def survey_form(email, full_name, class_name):
     # Lấy lịch sử bài làm của học viên này
     user_submissions = get_user_submissions(email)
     
-    # Đếm số lần đã làm bài
-    submission_count = len(user_submissions)
-    
-    # Kiểm tra giới hạn làm bài (tối đa 3 lần)
+    # Quản lý trạng thái số lần làm và xác nhận hoàn thành
     MAX_ATTEMPTS = 3
+    submission_count = len(user_submissions)
+    if "attempt_index" not in st.session_state:
+        # Lần tiếp theo theo DB, giới hạn tối đa 3
+        st.session_state.attempt_index = min(MAX_ATTEMPTS, submission_count + 1)
+    if "completed_attempts" not in st.session_state:
+        st.session_state.completed_attempts = False  # Đã xác nhận hoàn thành hay chưa
+    if "await_continue_confirm" not in st.session_state:
+        st.session_state.await_continue_confirm = False  # Đang yêu cầu xác nhận tiếp tục hay kết thúc
+    if "last_submission" not in st.session_state:
+        st.session_state.last_submission = None  # Lưu lần nộp gần nhất để hiển thị khi hoàn tất
+    if "last_max_score" not in st.session_state:
+        st.session_state.last_max_score = None
+    
     remaining_attempts = MAX_ATTEMPTS - submission_count
     
     # Hiển thị số lần làm bài và giới hạn
@@ -54,10 +64,10 @@ def survey_form(email, full_name, class_name):
         st.write(f"**Số lần đã làm bài:** {submission_count}/{MAX_ATTEMPTS}")
         
         # Hiển thị điểm cao nhất đã đạt được
-        #max_score = max([s["score"] for s in user_submissions])
-        #max_possible = sum([q["score"] for q in questions])
+        max_score = max([s["score"] for s in user_submissions])
+        max_possible = sum([q["score"] for q in questions])
         
-        #st.write(f"**Điểm cao nhất đã đạt được:** {max_score}/{max_possible} ({(max_score/max_possible*100):.1f}%)")
+        st.write(f"**Điểm cao nhất đã đạt được:** {max_score}/{max_possible} ({(max_score/max_possible*100):.1f}%)")
     else:
         st.write(f"**Đây là lần làm bài đầu tiên của bạn**")
     
@@ -67,35 +77,42 @@ def survey_form(email, full_name, class_name):
     st.write(f"**Tổng số câu hỏi:** {total_questions}")
     st.write(f"**Điểm tối đa:** {max_score}")
     
-    # Kiểm tra nếu đã đạt đến giới hạn làm bài
-    if remaining_attempts <= 0:
-        st.error("⚠️ Bạn đã sử dụng hết số lần làm bài cho phép (tối đa 3 lần).")
-        
-        # Hiển thị các lần làm bài trước đó
-        #if st.checkbox("Xem lịch sử các lần làm bài", key="view_history_checkbox"):
-            #display_submission_history(user_submissions, questions, max_score)
-        
+    # Nếu đã hết lượt theo DB
+    if remaining_attempts <= 0 and not st.session_state.completed_attempts:
+        # Bắt buộc xác nhận hoàn thành để xem kết quả
+        st.warning("Bạn đã đạt tối đa 3 lần. Hãy xác nhận hoàn thành để xem kết quả.")
+        if st.button("✅ Xác nhận hoàn thành và xem kết quả", use_container_width=True, key="confirm_complete_full"):
+            st.session_state.completed_attempts = True
+            st.rerun()
         return
     
     # Thông báo số lần còn lại
     if 0 < remaining_attempts < MAX_ATTEMPTS:
         st.warning(f"⚠️ Bạn còn {remaining_attempts} lần làm bài.")
     
-    # Khởi tạo biến theo dõi trạng thái nộp bài
+    # Khởi tạo biến theo dõi trạng thái nộp bài (trong một attempt)
     if "submission_result" not in st.session_state:
         st.session_state.submission_result = None
-    
-    # Nếu chưa nộp bài hoặc muốn làm lại
-    if st.session_state.submission_result is None:
+
+    # Nếu đã xác nhận hoàn thành -> hiển thị kết quả (lịch sử + chi tiết lần gần nhất)
+    if st.session_state.completed_attempts:
+        st.success("Bạn đã hoàn thành. Dưới đây là kết quả các lần làm bài.")
+        display_submission_history(get_user_submissions(email), questions, max_score)
+        # Nếu có lần nộp cuối cùng trong phiên, hiển thị chi tiết
+        if st.session_state.last_submission is not None:
+            st.divider()
+            st.subheader("Chi tiết lần nộp cuối cùng")
+            display_submission_details(st.session_state.last_submission, questions, st.session_state.last_max_score or max_score)
+        return
+
+    # Nếu chưa nộp bài hoặc đang trong quá trình xác nhận tiếp tục/kết thúc
+    if st.session_state.submission_result is None and not st.session_state.await_continue_confirm:
         # Tạo form để lưu trữ câu trả lời
         with st.form(key="survey_form"):
             st.subheader("Câu hỏi")
             
             # Lưu trữ câu trả lời tạm thời
             responses = {}
-            
-            # Đếm số câu hỏi tự luận để thống kê
-            essay_count = 0
             
             for q in questions:
                 q_id = q["id"]
@@ -105,54 +122,32 @@ def survey_form(email, full_name, class_name):
                     responses[str(q_id)] = st.multiselect(
                         "Chọn đáp án", 
                         options=q["answers"], 
-                        key=f"q_{q_id}"
+                        key=f"attempt_{st.session_state.attempt_index}_q_{q_id}"
                     )
                 elif q["type"] == "Combobox":
                     selected = st.selectbox(
                         "Chọn 1 đáp án", 
                         options=[""] + q["answers"], 
-                        key=f"q_{q_id}"
+                        key=f"attempt_{st.session_state.attempt_index}_q_{q_id}"
                     )
                     responses[str(q_id)] = [selected] if selected else []
                 elif q["type"] == "Essay":
-                    # Đếm số câu hỏi tự luận
-                    essay_count += 1
-                    
                     # Hiển thị mẫu câu trả lời nếu có
                     if q.get("answer_template"):
-                        st.info(f"**Gợi ý:** {q.get('answer_template')}")
+                        st.info(f"Gợi ý: {q.get('answer_template')}")
                     
-                    # Cải thiện hiển thị textarea để học viên nhập câu trả lời
-                    st.write("**Nhập câu trả lời của bạn:**")
+                    # Sử dụng text_area để cho phép nhập text tự do
                     essay_answer = st.text_area(
-                        "Câu trả lời",
+                        "Nhập câu trả lời",
                         height=150,
-                        key=f"q_{q_id}",
-                        help="Nhập câu trả lời của bạn vào đây. Câu trả lời sẽ được chấm điểm thủ công bởi giáo viên."
+                        key=f"attempt_{st.session_state.attempt_index}_q_{q_id}"
                     )
-                    
-                    # Lưu vào responses
                     responses[str(q_id)] = [essay_answer] if essay_answer else []
-                    
-                    # Hiển thị lưu ý cho câu hỏi tự luận
-                    if essay_answer:
-                        st.success("Đã nhập câu trả lời")
-                    else:
-                        st.warning("Vui lòng nhập câu trả lời")
                 
                 st.divider()
             
-            # Hiển thị lưu ý về câu hỏi tự luận nếu có
-            if essay_count > 0:
-                st.info(f"""
-                **Lưu ý:**
-                - Bài làm của bạn có **{essay_count}** câu hỏi tự luận.
-                - Các câu hỏi tự luận sẽ được chấm điểm thủ công bởi giáo viên.
-                - Điểm số cuối cùng có thể thay đổi sau khi giáo viên chấm điểm câu hỏi tự luận.
-                """)
-            
             # Nút gửi đáp án (trong form)
-            submit_button = st.form_submit_button(label="📨 Gửi đáp án", use_container_width=True)
+            submit_button = st.form_submit_button(label=f"📨 Gửi đáp án (lần {st.session_state.attempt_index})", use_container_width=True)
             
             if submit_button:
                 # Kiểm tra lại số lần làm bài (để đảm bảo không vượt quá giới hạn)
@@ -161,51 +156,41 @@ def survey_form(email, full_name, class_name):
                     st.error("Bạn đã sử dụng hết số lần làm bài cho phép!")
                     st.session_state.submission_result = None
                 else:
-                    # Kiểm tra xem có câu tự luận nào chưa trả lời không
-                    missing_essay = False
-                    for q in questions:
-                        if q["type"] == "Essay":
-                            q_id = str(q["id"])
-                            essay_ans = responses.get(q_id, [])
-                            if not essay_ans or not essay_ans[0].strip():
-                                missing_essay = True
-                                break
+                    # Lưu câu trả lời vào database với ID duy nhất
+                    result = save_submission(email, responses)
                     
-                    if missing_essay:
-                        st.error("Vui lòng trả lời tất cả các câu hỏi tự luận trước khi nộp bài!")
+                    if result:
+                        # Không hiển thị kết quả ngay; yêu cầu xác nhận tiếp tục/kết thúc
+                        st.session_state.submission_result = result
+                        st.session_state.max_score = max_score
+                        st.session_state.last_submission = result
+                        st.session_state.last_max_score = max_score
+                        st.session_state.await_continue_confirm = True
+                        st.rerun()
                     else:
-                        # Lưu câu trả lời vào database với ID duy nhất
-                        result = save_submission(email, responses)
-                        
-                        if result:
-                            st.session_state.submission_result = result
-                            st.session_state.max_score = max_score
-                            st.rerun()  # Làm mới trang để hiển thị kết quả
-                        else:
-                            st.error("❌ Có lỗi xảy ra khi gửi đáp án, vui lòng thử lại!")
-    
-    # Hiển thị kết quả sau khi nộp bài
-    else:
+                        st.error("❌ Có lỗi xảy ra khi gửi đáp án, vui lòng thử lại!")
+
+    # Sau khi nộp, yêu cầu xác nhận tiếp tục/kết thúc
+    if st.session_state.await_continue_confirm and st.session_state.submission_result is not None:
         result = st.session_state.submission_result
-        max_score = st.session_state.max_score
-        
-        st.success(f"✅ Đã ghi nhận bài làm của bạn! (Mã nộp: {result['id']})")
-        
-        # Hiển thị thông tin chi tiết về kết quả
-        display_submission_details(result, questions, max_score)
-        
-        # Cập nhật lại số lần làm bài sau khi nộp thành công
-        updated_submissions = get_user_submissions(email)
-        updated_count = len(updated_submissions)
-        remaining = MAX_ATTEMPTS - updated_count
-        
-        # Nút làm bài lại (nếu còn lượt)
-        if remaining > 0:
-            if st.button("🔄 Làm bài lại", use_container_width=True, key="retry_button"):
-                st.session_state.submission_result = None
+        st.success(f"✅ Đã ghi nhận bài làm lần {st.session_state.attempt_index}! (Mã nộp: {result['id']})")
+        col1, col2 = st.columns(2)
+        with col1:
+            can_continue = (submission_count + 1) < MAX_ATTEMPTS
+            if can_continue:
+                if st.button(f"➡️ Tiếp tục làm lần {st.session_state.attempt_index + 1}", use_container_width=True, key="confirm_continue"):
+                    # Tăng attempt, chuẩn bị form mới với key độc lập
+                    st.session_state.attempt_index = min(MAX_ATTEMPTS, st.session_state.attempt_index + 1)
+                    st.session_state.submission_result = None
+                    st.session_state.await_continue_confirm = False
+                    st.rerun()
+            else:
+                st.info("Đã đạt tối đa 3 lần. Vui lòng xác nhận hoàn thành để xem kết quả.")
+        with col2:
+            if st.button("✅ Hoàn thành và xem kết quả", use_container_width=True, key="confirm_finish"):
+                st.session_state.completed_attempts = True
+                st.session_state.await_continue_confirm = False
                 st.rerun()
-        else:
-            st.warning("⚠️ Bạn đã sử dụng hết số lần làm bài cho phép.")
 
 def check_answer_correctness(student_answers, question):
     """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án và câu hỏi tự luận."""
@@ -213,9 +198,9 @@ def check_answer_correctness(student_answers, question):
     if not student_answers:
         return False
         
-    # Đối với câu hỏi tự luận (Essay), luôn đánh giá dựa trên việc có nhập câu trả lời hay không
+    # Đối với câu hỏi tự luận (Essay), luôn đánh giá là đúng nếu có trả lời
     if question["type"] == "Essay":
-        # Chỉ cần học viên nhập nội dung vào ô text là tính đúng (điểm sẽ được chấm thủ công sau)
+        # Chỉ cần học viên nhập nội dung vào ô text là tính đúng
         return len(student_answers) > 0 and student_answers[0].strip() != ""
         
     # Đối với câu hỏi combobox (chỉ chọn một)
@@ -279,54 +264,19 @@ def display_submission_details(submission, questions, max_score):
         correct_count = sum(1 for q in questions if check_correct_for_report(submission, q))
         incorrect_count = len(questions) - correct_count
         
-        # Kiểm tra số câu hỏi tự luận
-        essay_questions = [q for q in questions if q.get("type") == "Essay"]
-        essay_count = len(essay_questions)
-        
-        if essay_count > 0:
-            st.info(f"""
-            **Lưu ý về câu hỏi tự luận:**
-            - Bài làm của bạn có {essay_count} câu hỏi tự luận.
-            - Các câu hỏi tự luận sẽ được giáo viên chấm điểm thủ công.
-            - Điểm số hiện tại có thể chưa bao gồm điểm của các câu hỏi tự luận.
-            - Vui lòng kiểm tra lại sau.
-            """)
-        
         # Hiển thị dạng biểu đồ đơn giản
-        st.subheader("Thống kê kết quả làm bài")
+        st.subheader("Thống kê kết quả")
         
         col1, col2 = st.columns(2)
-        col1.metric("Câu hỏi đã làm", f"{correct_count}/{len(questions)}")
-        col2.metric("Câu hỏi chưa làm", f"{incorrect_count}/{len(questions)}")
+        col1.metric("Câu trả lời đúng", f"{correct_count}/{len(questions)}")
+        col2.metric("Câu trả lời sai", f"{incorrect_count}/{len(questions)}")
         
         # Tạo progress bar hiển thị tỷ lệ đúng/sai
         st.progress(correct_count / len(questions))
-        st.caption(f"Tỷ lệ câu đã trả lời: {(correct_count / len(questions) * 100):.1f}%")
+        st.caption(f"Tỷ lệ câu trả lời đúng: {(correct_count / len(questions) * 100):.1f}%")
     
     with tab_details:
         st.subheader("Chi tiết câu trả lời")
-        
-        # Lấy điểm câu hỏi tự luận (nếu có)
-        essay_grades = {}
-        if "essay_grades" in submission:
-            if isinstance(submission["essay_grades"], str):
-                try:
-                    essay_grades = json.loads(submission["essay_grades"])
-                except:
-                    essay_grades = {}
-            else:
-                essay_grades = submission.get("essay_grades", {})
-                
-        # Lấy nhận xét câu hỏi tự luận (nếu có)
-        essay_comments = {}
-        if "essay_comments" in submission:
-            if isinstance(submission["essay_comments"], str):
-                try:
-                    essay_comments = json.loads(submission["essay_comments"])
-                except:
-                    essay_comments = {}
-            else:
-                essay_comments = submission.get("essay_comments", {})
         
         # Hiển thị chi tiết từng câu hỏi
         for q in questions:
@@ -357,15 +307,11 @@ def display_submission_details(submission, questions, max_score):
                     st.text_area("", value=essay_answer, height=100, disabled=True,
                                 key=f"display_essay_{q_id}")
                     
-                    # Đối với câu hỏi tự luận, hiển thị trạng thái chấm điểm
-                    if q_id in essay_grades:
-                        st.success(f"✅ Đã được chấm điểm: {essay_grades[q_id]}/{q['score']} điểm")
-                        
-                        # Hiển thị nhận xét nếu có
-                        if q_id in essay_comments and essay_comments[q_id]:
-                            st.info(f"**Nhận xét:** {essay_comments[q_id]}")
+                    # Đối với câu hỏi tự luận, luôn tính là đúng nếu có trả lời
+                    if is_correct:
+                        st.success(f"✅ Đã trả lời (+{q['score']} điểm)")
                     else:
-                        st.warning("⏳ Chưa được chấm điểm - Vui lòng kiểm tra lại sau")
+                        st.error("❌ Không trả lời (0 điểm)")
                 else:
                     # Đối với câu hỏi trắc nghiệm, hiển thị các đáp án
                     # Đáp án đúng
@@ -465,28 +411,6 @@ def display_submission_history(submissions, questions, max_score):
             st.progress(correct_count / len(questions))
             st.caption(f"Tỷ lệ câu trả lời đúng: {(correct_count / len(questions) * 100):.1f}%")
             
-            # Lấy điểm câu hỏi tự luận (nếu có)
-            essay_grades = {}
-            if "essay_grades" in s:
-                if isinstance(s["essay_grades"], str):
-                    try:
-                        essay_grades = json.loads(s["essay_grades"])
-                    except:
-                        essay_grades = {}
-                else:
-                    essay_grades = s.get("essay_grades", {})
-                    
-            # Lấy nhận xét câu hỏi tự luận (nếu có)
-            essay_comments = {}
-            if "essay_comments" in s:
-                if isinstance(s["essay_comments"], str):
-                    try:
-                        essay_comments = json.loads(s["essay_comments"])
-                    except:
-                        essay_comments = {}
-                else:
-                    essay_comments = s.get("essay_comments", {})
-            
             # Hiển thị chi tiết từng câu hỏi
             for q in questions:
                 q_id = str(q["id"])
@@ -507,15 +431,11 @@ def display_submission_history(submissions, questions, max_score):
                     st.text_area("", value=essay_answer, height=100, disabled=True,
                                 key=f"history_essay_{q_id}_{idx}")
                     
-                    # Hiển thị kết quả chấm điểm nếu có
-                    if q_id in essay_grades:
-                        st.success(f"✅ Đã được chấm điểm: {essay_grades[q_id]}/{q['score']} điểm")
-                        
-                        # Hiển thị nhận xét nếu có
-                        if q_id in essay_comments and essay_comments[q_id]:
-                            st.info(f"**Nhận xét:** {essay_comments[q_id]}")
+                    # Đối với câu hỏi tự luận, luôn tính là đúng nếu có trả lời
+                    if is_correct:
+                        st.success(f"✅ Đã trả lời (+{q['score']} điểm)")
                     else:
-                        st.warning("⏳ Ban tổ chức sẽ chấm điểm và thông tin kết quả")
+                        st.error("❌ Không trả lời (0 điểm)")
                 else:
                     # Hiển thị đáp án của câu hỏi trắc nghiệm
                     st.write("Đáp án đã chọn:")
@@ -527,7 +447,7 @@ def display_submission_history(submissions, questions, max_score):
                     
                     # Hiển thị kết quả
                     if is_correct:
-                        st.success(f"✅ Đúng (+{q.get('score', 0)} điểm)")
+                        st.success(f"✅ Đúng (+{q['score']} điểm)")
                     else:
                         st.error("❌ Sai (0 điểm)")
                         expected_indices = q["correct"]
