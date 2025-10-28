@@ -253,40 +253,31 @@ def calculate_score(responses, questions):
     return total_score
 
 def check_answer_correctness(student_answers, question):
-    """Kiểm tra đáp án có đúng không.
-    - Checkbox: so khớp tập chỉ số đáp án
-    - Combobox: so khớp một đáp án
-    - Essay: tính là đúng nếu có nội dung (không rỗng)
-    """
+    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án."""
+    # Nếu câu trả lời trống, không đúng
     if not student_answers:
         return False
-
-    q_type = question.get("type")
-
-    # Tự luận: chỉ cần có nội dung
-    if q_type == "Essay":
-        return bool(student_answers) and isinstance(student_answers[0], str) and student_answers[0].strip() != ""
-
-    # Combobox: chọn một
-    if q_type == "Combobox":
+        
+    # Đối với câu hỏi combobox (chỉ chọn một)
+    if question["type"] == "Combobox":
+        # Nếu có một đáp án và đáp án đó ở vị trí nằm trong danh sách đáp án đúng
         if len(student_answers) == 1:
             answer_text = student_answers[0]
-            answers = question.get("answers", [])
-            correct = question.get("correct", [])
-            answer_index = answers.index(answer_text) + 1 if answer_text in answers else -1
-            return answer_index in correct
+            answer_index = question["answers"].index(answer_text) + 1 if answer_text in question["answers"] else -1
+            return answer_index in question["correct"]
         return False
-
-    # Checkbox: nhiều lựa chọn
-    if q_type == "Checkbox":
-        answers = question.get("answers", [])
-        correct = set(question.get("correct", []))
+    
+    # Đối với câu hỏi checkbox (nhiều lựa chọn)
+    elif question["type"] == "Checkbox":
+        # Tìm index (vị trí) của các đáp án học viên đã chọn
         selected_indices = []
         for ans in student_answers:
-            if ans in answers:
-                selected_indices.append(answers.index(ans) + 1)
-        return set(selected_indices) == correct
-
+            if ans in question["answers"]:
+                selected_indices.append(question["answers"].index(ans) + 1)
+        
+        # So sánh với danh sách đáp án đúng
+        return set(selected_indices) == set(question["correct"])
+    
     return False
 
 # mới thêm code here
