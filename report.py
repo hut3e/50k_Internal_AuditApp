@@ -47,12 +47,12 @@ except ImportError:
                 if isinstance(answers, str):
                     try:
                         answers = json.loads(answers)
-                    except:
+            except:
                         answers = [answers]
                 if isinstance(correct, str):
-                    try:
+                try:
                         correct = json.loads(correct)
-                    except:
+                except:
                         try:
                             correct = [int(x.strip()) for x in correct.split(",")]
                         except:
@@ -379,10 +379,10 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
         from openpyxl.utils import get_column_letter
         
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
             used_names = set()
-            for df, sheet_name in zip(dataframes, sheet_names):
+        for df, sheet_name in zip(dataframes, sheet_names):
                 # Làm sạch sheet name để tránh lỗi ký tự không hợp lệ
                 base_name = sanitize_sheet_name(sheet_name)
                 clean_sheet_name = base_name
@@ -553,7 +553,7 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
         output.seek(0)
         
         # Lấy data
-        data = output.getvalue()
+    data = output.getvalue()
         if not data or len(data) < 100:
             # Thử read nếu getvalue không có
             output.seek(0)
@@ -603,6 +603,10 @@ def dataframe_to_docx(df, title, filename):
         time_paragraph = doc.add_paragraph(f"Thời gian xuất báo cáo: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         time_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         
+        # Xử lý trường hợp DataFrame rỗng hoặc không có cột để tránh DOCX hỏng
+        if df is None or not hasattr(df, 'columns') or len(df.columns) == 0:
+            doc.add_paragraph("Không có dữ liệu để hiển thị.")
+        else:
         # Tạo bảng
         # Thêm một hàng cho tiêu đề cột
         table = doc.add_table(rows=1, cols=len(df.columns), style='Table Grid')
@@ -618,6 +622,14 @@ def dataframe_to_docx(df, title, filename):
                 run.bold = True
         
         # Thêm dữ liệu
+            if len(df) == 0:
+                # Nếu không có dòng dữ liệu, thêm một dòng thông báo
+                row_cells = table.add_row().cells
+                if len(row_cells) > 0:
+                    row_cells[0].text = "Không có dữ liệu"
+                    for paragraph in row_cells[0].paragraphs:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            else:
         for _, row in df.iterrows():
             row_cells = table.add_row().cells
             for i, value in enumerate(row):
@@ -648,8 +660,8 @@ def dataframe_to_docx(df, title, filename):
             temp_buffer.close()
             
             # Đảm bảo buffer ở đầu
-            buffer.seek(0)
-            
+        buffer.seek(0)
+        
             # Kiểm tra nội dung
             content = buffer.getvalue()
             if not content or len(content) < 100:
@@ -661,7 +673,7 @@ def dataframe_to_docx(df, title, filename):
             
             # Đảm bảo buffer ở đầu để sẵn sàng đọc
             buffer.seek(0)
-            return buffer
+        return buffer
         except Exception as save_error:
             print(f"Lỗi khi lưu DOCX vào buffer: {save_error}")
             import traceback
@@ -908,7 +920,7 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.lib.units import mm
         
-        buffer = io.BytesIO()
+    buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, 
                                 rightMargin=10*mm, leftMargin=10*mm,
                                 topMargin=15*mm, bottomMargin=15*mm)
@@ -942,26 +954,33 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         story.append(timestamp_para)
         story.append(Spacer(1, 4*mm))
         
-        # Prepare table data
+        # Prepare table data (xử lý df rỗng an toàn)
         table_data = []
-        
-        # Header
-        header = [str(col) for col in df.columns]
-        table_data.append(header)
-        
-        # Data rows (limit để tránh file quá lớn)
-        max_rows = min(500, len(df))
-        for i in range(max_rows):
-            row = [str(df.iloc[i, j])[:100] if len(str(df.iloc[i, j])) > 100 else str(df.iloc[i, j]) 
-                   for j in range(len(df.columns))]
-            table_data.append(row)
+        if df is None or not hasattr(df, 'columns') or len(df.columns) == 0:
+            table_data = [["Không có dữ liệu"]]
+        else:
+            # Header
+            header = [str(col) for col in df.columns]
+            table_data.append(header)
+            
+            # Data rows (limit để tránh file quá lớn)
+            max_rows = min(500, len(df))
+            if max_rows == 0:
+                table_data.append(["Không có dữ liệu"] + [""] * (len(df.columns) - 1))
+            else:
+                for i in range(max_rows):
+                    row = [str(df.iloc[i, j])[:100] if len(str(df.iloc[i, j])) > 100 else str(df.iloc[i, j]) 
+                           for j in range(len(df.columns))]
+                    table_data.append(row)
         
         # Create table
-        col_widths = [50*mm] * len(df.columns)  # Default width
+        # Tính độ rộng cột an toàn cho A4
+        num_cols = len(df.columns) if df is not None and hasattr(df, 'columns') and len(df.columns) > 0 else 1
+        col_widths = [50*mm] * num_cols  # Default width
         # Adjust based on content (simplified)
-        if len(df.columns) > 0:
-            avg_col_width = (A4[0] - 20*mm) / len(df.columns)
-            col_widths = [avg_col_width] * len(df.columns)
+        if num_cols > 0:
+            avg_col_width = (A4[0] - 20*mm) / num_cols
+            col_widths = [avg_col_width] * num_cols
         
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
@@ -1118,7 +1137,7 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             if new_total > usable_width:
                 # Scale lại lần nữa
                 scale_factor = usable_width / new_total
-                col_widths = [width * scale_factor for width in col_widths]
+            col_widths = [width * scale_factor for width in col_widths]
         
         # Đảm bảo mỗi cột >= min_width cuối cùng (trước khi vẽ)
         for idx in range(len(col_widths)):
@@ -1217,7 +1236,7 @@ def dataframe_to_pdf_fpdf(df, title, filename):
                 
                 # Tính số dòng cần thiết cho nội dung này
                 try:
-                    content_width = pdf.get_string_width(content)
+                content_width = pdf.get_string_width(content)
                 except:
                     # Fallback: ước tính thô
                     content_width = len(content) * pdf.get_string_width('W') / 10
@@ -1334,13 +1353,13 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             except Exception:
                 simple_pdf.output(dest=buffer)
                 buffer.flush()
-            
-            buffer.seek(0)
+    
+    buffer.seek(0)
             
             # Kiểm tra lại
             content = buffer.getvalue()
             if content and len(content) > 100 and content.startswith(b'%PDF'):
-                return buffer
+    return buffer
             else:
                 return None
         except Exception as e2:
@@ -1534,7 +1553,7 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             except ImportError:
                 # Fallback nếu không import được - nhưng nên có cảnh báo
                 print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
-                is_correct = check_answer_correctness(user_ans, q)
+            is_correct = check_answer_correctness(user_ans, q)
             
             # Tính điểm cho câu hỏi này theo từng loại
             q_type = q.get("type", "")
@@ -1953,7 +1972,7 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             except ImportError:
                 # Fallback nếu không import được - nhưng nên có cảnh báo
                 print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
-                is_correct = check_answer_correctness(user_ans, q)
+            is_correct = check_answer_correctness(user_ans, q)
             
             # Tính điểm cho câu hỏi này theo từng loại
             q_type = q.get("type", "")
@@ -2188,13 +2207,13 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             except Exception:
                 simple_pdf.output(dest=buffer)
                 buffer.flush()
-            
-            buffer.seek(0)
+    
+    buffer.seek(0)
             
             # Kiểm tra lại
             content = buffer.getvalue()
             if content and len(content) > 100 and content.startswith(b'%PDF'):
-                return buffer
+    return buffer
             else:
                 return None
         except Exception as e2:
@@ -2301,7 +2320,7 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
         students = []
     if questions is None:
         questions = []
-    
+        
     # Đảm bảo load lại students nếu chưa có - bao gồm tất cả roles
     if not students:
         try:
@@ -2515,7 +2534,7 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                             from database_helper import check_answer_correctness as db_check_answer
                             is_correct = db_check_answer(user_ans, q)
                         except ImportError:
-                            is_correct = check_answer_correctness(user_ans, q)
+                        is_correct = check_answer_correctness(user_ans, q)
                         if is_correct:
                             total_correct += 1
                         
@@ -2583,9 +2602,9 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                             if docx_buffer is not None:
                                 get_download_link_docx(
                                     docx_buffer, 
-                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
+                                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
                                     "📥 Tải xuống báo cáo chi tiết (DOCX)"
-                                )
+                            )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo DOCX: {str(e)}")
                             import traceback
@@ -2606,9 +2625,9 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                             if pdf_buffer is not None:
                                 get_download_link_pdf(
                                     pdf_buffer, 
-                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
+                                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
                                     "📥 Tải xuống báo cáo chi tiết (PDF)"
-                                )
+                            )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo PDF: {str(e)}")
     else:
@@ -2661,9 +2680,9 @@ def display_question_tab(submissions=None, questions=None):
                     is_correct = check_answer_correctness(user_ans, q)
                 
                 if is_correct:
-                    correct_count += 1
-                else:
-                    wrong_count += 1
+                correct_count += 1
+            else:
+                wrong_count += 1
         
         question_stats[q_id] = {
             "question": q.get("question", ""),
@@ -2907,7 +2926,7 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
         submissions = []
     if students is None:
         students = []
-    
+        
     st.subheader("Danh sách học viên")
     
     # Đảm bảo load lại students nếu chưa có - bao gồm tất cả roles
@@ -2935,7 +2954,7 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
             st.error(f"❌ Lỗi khi load danh sách users: {str(e)}")
             import traceback
             st.code(traceback.format_exc(), language="python")
-            return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
     # Phân tích roles
     role_counts = {}
@@ -3120,7 +3139,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
                     except:
-                        pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
+                    pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -3147,7 +3166,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
                     except:
-                        pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
+                    pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -3173,7 +3192,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
                     except:
-                        pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
+                    pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -3199,7 +3218,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
                     except:
-                        pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
+                    pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -3364,7 +3383,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                 from database_helper import check_answer_correctness as db_check_answer
                                 is_correct = db_check_answer(user_ans, q)
                             except ImportError:
-                                is_correct = check_answer_correctness(user_ans, q)
+                            is_correct = check_answer_correctness(user_ans, q)
                             
                             if is_correct:
                                 correct_count += 1
@@ -3411,16 +3430,16 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         with col1:
                             # Word
                             try:
-                                docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
+                            docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
                                 if docx_buffer is None:
                                     st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
                                 else:
-                                    st.markdown(
-                                        get_download_link_docx(docx_buffer, 
-                                                            f"bao_cao_{student_name.replace(' ', '_')}.docx", 
-                                                            "Tải xuống báo cáo DOCX"), 
-                                        unsafe_allow_html=True
-                                    )
+                            st.markdown(
+                                get_download_link_docx(docx_buffer, 
+                                                    f"bao_cao_{student_name.replace(' ', '_')}.docx", 
+                                                    "Tải xuống báo cáo DOCX"), 
+                                unsafe_allow_html=True
+                            )
                             except Exception as e:
                                 st.error(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
                         
@@ -3430,13 +3449,13 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                 try:
                                     pdf_buffer = dataframe_to_pdf_reportlab(df_student_report, title, f"bao_cao_{student_name}.pdf")
                                 except:
-                                    pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
+                            pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
                                 if pdf_buffer is not None:
                                     get_download_link_pdf(
                                         pdf_buffer, 
-                                        f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
+                                                    f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
                                         "📥 Tải xuống báo cáo PDF"
-                                    )
+                            )
                             except Exception as e:
                                 st.error(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
                         
@@ -3450,7 +3469,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                             excel_dfs = []
                             excel_sheet_names = []
                             
-                            for idx, submission in enumerate(student_submissions):
+                        for idx, submission in enumerate(student_submissions):
                                 # Tạo DataFrame cho lần làm này
                                 submission_data = []
                                 
@@ -3532,7 +3551,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                             docx_buffer, 
                                             f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.docx", 
                                             f"📥 Tải xuống báo cáo lần {idx+1} (DOCX)"
-                                        )
+                                    )
                                 except Exception as e:
                                     st.error(f"Lỗi khi tạo báo cáo DOCX lần {idx+1}: {str(e)}")
                             
@@ -3553,7 +3572,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                             pdf_buffer, 
                                             f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.pdf", 
                                             f"📥 Tải xuống báo cáo lần {idx+1} (PDF)"
-                                        )
+                                    )
                                 except Exception as e:
                                     st.error(f"Lỗi khi tạo báo cáo PDF lần {idx+1}: {str(e)}")
                             
@@ -3756,13 +3775,13 @@ def view_statistics():
                 # Fallback: thử lấy từng học viên nếu lỗi
                 st.info("Đang thử cách khác...")
                 submissions = []
-                for student in students:
-                    try:
+            for student in students:
+                try:
                         try:
                             from database_helper import get_user_submissions as db_get_user_submissions
                             student_submissions = db_get_user_submissions(student.get("email", ""))
                         except ImportError:
-                            student_submissions = get_user_submissions(student.get("email", ""))
+                    student_submissions = get_user_submissions(student.get("email", ""))
                         
                         if student_submissions:
                             # Validate responses cho mỗi submission
@@ -3772,7 +3791,7 @@ def view_statistics():
                                         sub["responses"] = json.loads(sub["responses"])
                                     except:
                                         sub["responses"] = {}
-                            submissions.extend(student_submissions)
+                    submissions.extend(student_submissions)
                     except Exception as ex:
                         print(f"Lỗi khi lấy dữ liệu của học viên {student.get('email', '')}: {str(ex)}")
         
@@ -3900,13 +3919,13 @@ def view_statistics():
                         expected = [q_answers[i - 1] for i in q_correct]
                     except (IndexError, TypeError):
                         expected = ["Lỗi đáp án"]
-                    
+                        
                     # Sử dụng hàm từ database_helper (không dùng mock)
                     try:
                         from database_helper import check_answer_correctness as db_check_answer
                         is_correct = db_check_answer(user_ans, q)
                     except ImportError:
-                        is_correct = check_answer_correctness(user_ans, q)
+                    is_correct = check_answer_correctness(user_ans, q)
                     
                     # Thêm thông tin câu hỏi
                     submission_data[f"Câu {q_id}: {q.get('question', '')}"] = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
