@@ -95,7 +95,7 @@ def display_logos():
                 st.error(f"Lỗi khi hiển thị logo {logo_path}: {e}")
         
         # Hiển thị tiêu đề ứng dụng ở giữa
-        st.title("TRAINING INTERNAL AUDIT ISO 50001 TEST APP")
+        st.title("KARCHER VIETNAM INTERNAL AUDIT ISO 50001 TRAINING APP")
     
     # Phần tải lên logo mới - ẩn trong expander để không chiếm nhiều không gian
     with st.expander("Cấu hình logo"):
@@ -138,7 +138,7 @@ def display_logos():
 
 def main():
     st.set_page_config(
-        page_title="Hệ thống kiểm tra học viên sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018",
+        page_title="Hệ thống kiểm tra học viên Karcher theo Tiêu chuẩn ISO 50001:2018",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -165,7 +165,7 @@ def main():
     
     # Sidebar - Menu điều hướng
     with st.sidebar:
-        st.title("📝 Hệ thống kiểm tra học viên sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018")
+        st.title("📝 Hệ thống kiểm tra học viên Karcher theo Tiêu chuẩn ISO 50001:2018")
         st.success("Đã kết nối thành công đến Supabase!")
         
         # Hiển thị thông tin dự án (ẩn key)
@@ -328,7 +328,7 @@ def main():
                     st.info("Bạn chưa có bài làm nào. Hãy làm bài khảo sát ở tab 'Làm bài khảo sát'.")
     else:
         # Màn hình chào mừng
-        st.header("Chào mừng các Bạn học viên !")
+        st.header("Chào mừng các Bạn học viên Công ty Karcher Việt Nam tham gia khóa Đào tạo ISO 50001:2018 !")
         
         st.markdown("""
         ### Tính năng chính:
@@ -347,7 +347,7 @@ def main():
         """)
         
         # Hiển thị một số thông tin demo
-        with st.expander("Thông tin App kiểm tra sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018"):
+        with st.expander("Thông tin App kiểm tra sau Đào tạo Karcher Tiêu chuẩn ISO 50001:2018"):
             st.write("""
             **Đây là phiên bản App Ver 1.0 do Team ISO 50001 TUV phát triển**
             
@@ -403,3 +403,4 @@ def setup_environment_variables():
 
 if __name__ == "__main__":
     main()
+
