@@ -408,42 +408,54 @@ def dataframe_to_docx(df, title, filename):
         footer = doc.add_paragraph("Hệ thống Khảo sát & Đánh giá")
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Lưu tệp vào buffer
+        # Lưu tệp vào buffer - đảm bảo cách xử lý đúng
         buffer = io.BytesIO()
-        doc.save(buffer)
-        
-        # Đảm bảo tất cả dữ liệu được ghi vào buffer
-        buffer.flush()
-        
-        # Đưa về đầu để đọc
-        buffer.seek(0)
-        
-        # Đọc lại để đảm bảo buffer có dữ liệu
-        content = buffer.getvalue()
-        if not content or len(content) < 100:
-            # Nếu getvalue() không có, thử read()
+        try:
+            # Lưu document vào buffer
+            doc.save(buffer)
+            
+            # Đảm bảo tất cả dữ liệu được ghi vào buffer
+            buffer.flush()
+            
+            # Đưa về đầu để đọc
             buffer.seek(0)
-            content = buffer.read()
+            
+            # Đọc lại để đảm bảo buffer có dữ liệu
+            content = buffer.getvalue()
+            if not content or len(content) < 100:
+                # Nếu getvalue() không có, thử read()
+                buffer.seek(0)
+                content = buffer.read()
+                buffer.seek(0)
+            
+            # Kiểm tra buffer có dữ liệu hợp lệ không
+            if not content or len(content) < 100:
+                raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
+            
+            # Kiểm tra signature DOCX (PK = ZIP format)
+            if content[:2] != b'PK':
+                raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
+            
+            # Đảm bảo buffer ở đầu để sẵn sàng đọc
             buffer.seek(0)
-        
-        # Kiểm tra buffer có dữ liệu hợp lệ không
-        if not content or len(content) < 100:
-            raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
-        
-        # Kiểm tra signature DOCX (PK = ZIP format)
-        if content[:2] != b'PK':
-            raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
-        
-        # Đảm bảo buffer ở đầu để sẵn sàng đọc
-        buffer.seek(0)
-        return buffer
+            return buffer
+        except Exception as save_error:
+            print(f"Lỗi khi lưu DOCX vào buffer: {save_error}")
+            import traceback
+            traceback.print_exc()
+            # Đóng buffer và trả về None
+            try:
+                buffer.close()
+            except:
+                pass
+            return None
             
     except Exception as e:
         print(f"Lỗi khi tạo DOCX: {str(e)}")
         import traceback
         traceback.print_exc()
         st.error(f"Không thể tạo file DOCX: {str(e)}")
-        # Trả về buffer trống nếu lỗi
+        # Trả về None nếu lỗi
         return None
 
 class UNIOCDF_FPDF(FPDF):
@@ -1037,6 +1049,10 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         total_correct = 0
         total_questions = len(questions)
         calculated_total_score = 0  # Tổng điểm tính lại từ đầu
+        multiple_choice_score = 0  # Điểm trắc nghiệm (Checkbox + Combobox)
+        essay_score = 0  # Điểm tự luận (Essay)
+        multiple_choice_questions = 0  # Số câu trắc nghiệm
+        essay_questions = 0  # Số câu tự luận
         
         doc.add_heading("Chi tiết câu trả lời", level=2)
         
@@ -1146,7 +1162,8 @@ def create_student_report_docx(student_name, student_email, student_class, submi
                 print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
                 is_correct = check_answer_correctness(user_ans, q)
             
-            # Tính điểm cho câu hỏi này
+            # Tính điểm cho câu hỏi này theo từng loại
+            q_type = q.get("type", "")
             if is_correct:
                 total_correct += 1
                 result = "Đúng"
@@ -1154,6 +1171,18 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             else:
                 result = "Sai"
                 points = 0
+            
+            # Phân loại điểm: trắc nghiệm hoặc tự luận
+            if q_type in ["Checkbox", "Combobox"]:
+                # Câu hỏi trắc nghiệm
+                multiple_choice_questions += 1
+                if is_correct:
+                    multiple_choice_score += points
+            elif q_type == "Essay":
+                # Câu hỏi tự luận
+                essay_questions += 1
+                if is_correct:
+                    essay_score += points
             
             # Cộng vào tổng điểm
             calculated_total_score += points
@@ -1223,9 +1252,13 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             row_cells[4].text = str(points)
             row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Thêm tổng kết với định dạng rõ ràng
+        # Tính điểm tối đa cho từng loại
+        max_multiple_choice = sum([q.get("score", 0) for q in questions if q.get("type") in ["Checkbox", "Combobox"]])
+        max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
+        
+        # Thêm tổng kết với định dạng rõ ràng - bao gồm điểm trắc nghiệm và tự luận
         doc.add_heading("Tổng kết", level=2)
-        summary_table = doc.add_table(rows=3, cols=2, style='Table Grid')
+        summary_table = doc.add_table(rows=6, cols=2, style='Table Grid')
         
         # Thiết lập độ rộng cho bảng tổng kết
         for cell in summary_table.columns[0].cells:
@@ -1234,7 +1267,7 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             cell.width = Inches(3.0)
         
         # Thêm màu nền cho cột tiêu đề
-        for i in range(3):
+        for i in range(6):
             cell = summary_table.rows[i].cells[0]
             paragraph = cell.paragraphs[0]
             if not paragraph.runs:
@@ -1243,18 +1276,31 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             shading_elm = parse_xml(r'<w:shd {} w:fill="E9E9E9"/>'.format(nsdecls('w')))
             cell._tc.get_or_add_tcPr().append(shading_elm)
         
+        # Thông tin tổng quan
         cells = summary_table.rows[0].cells
         cells[0].text = "Số câu đúng"
         cells[1].text = f"{total_correct}/{total_questions}"
         
         cells = summary_table.rows[1].cells
-        cells[0].text = "Điểm số"
+        cells[0].text = "Điểm trắc nghiệm"
+        cells[1].text = f"{multiple_choice_score}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0"
+        
+        cells = summary_table.rows[2].cells
+        cells[0].text = "Điểm tự luận"
+        cells[1].text = f"{essay_score}/{max_essay}" if max_essay > 0 else "0/0"
+        
+        cells = summary_table.rows[3].cells
+        cells[0].text = "Tổng điểm"
         # Sử dụng điểm đã tính lại để đảm bảo chính xác
         cells[1].text = f"{calculated_total_score}/{max_possible}"
         
-        cells = summary_table.rows[2].cells
+        cells = summary_table.rows[4].cells
         cells[0].text = "Tỷ lệ đúng"
         cells[1].text = f"{(total_correct/total_questions*100):.1f}%" if total_questions > 0 else "0%"
+        
+        cells = summary_table.rows[5].cells
+        cells[0].text = "Tỷ lệ điểm"
+        cells[1].text = f"{(calculated_total_score/max_possible*100):.1f}%" if max_possible > 0 else "0%"
         
         # Thêm chân trang
         doc.add_paragraph()
@@ -1358,6 +1404,10 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         total_correct = 0
         total_questions = len(questions)
         calculated_total_score = 0  # Tổng điểm tính lại từ đầu
+        multiple_choice_score = 0  # Điểm trắc nghiệm (Checkbox + Combobox)
+        essay_score = 0  # Điểm tự luận (Essay)
+        multiple_choice_questions = 0  # Số câu trắc nghiệm
+        essay_questions = 0  # Số câu tự luận
         
         # Đảm bảo responses đúng định dạng - parse từ JSON string nếu cần
         responses = submission.get("responses", {})
@@ -1519,12 +1569,25 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
                 print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
                 is_correct = check_answer_correctness(user_ans, q)
             
-            # Tính điểm cho câu hỏi này
+            # Tính điểm cho câu hỏi này theo từng loại
+            q_type = q.get("type", "")
             if is_correct:
                 total_correct += 1
                 points = q.get("score", 0)
             else:
                 points = 0
+            
+            # Phân loại điểm: trắc nghiệm hoặc tự luận
+            if q_type in ["Checkbox", "Combobox"]:
+                # Câu hỏi trắc nghiệm
+                multiple_choice_questions += 1
+                if is_correct:
+                    multiple_choice_score += points
+            elif q_type == "Essay":
+                # Câu hỏi tự luận
+                essay_questions += 1
+                if is_correct:
+                    essay_score += points
             
             # Cộng vào tổng điểm
             calculated_total_score += points
@@ -1616,7 +1679,11 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         
         pdf.ln(5)
         
-        # Tổng kết
+        # Tính điểm tối đa cho từng loại
+        max_multiple_choice = sum([q.get("score", 0) for q in questions if q.get("type") in ["Checkbox", "Combobox"]])
+        max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
+        
+        # Tổng kết - bao gồm điểm trắc nghiệm và tự luận
         _set_font_safe(pdf, 'B', 12)
         pdf.cell(0, 10, 'Tong ket', 0, 1, 'L')
         
@@ -1630,13 +1697,23 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         pdf.cell(summary_col1, 10, 'So cau dung', 1, 0, 'L', 1)
         pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
         
-        pdf.cell(summary_col1, 10, 'Diem so', 1, 0, 'L', 1)
+        pdf.cell(summary_col1, 10, 'Diem trac nghiem', 1, 0, 'L', 1)
+        pdf.cell(summary_col2, 10, f"{multiple_choice_score}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0", 1, 1, 'L')
+        
+        pdf.cell(summary_col1, 10, 'Diem tu luan', 1, 0, 'L', 1)
+        pdf.cell(summary_col2, 10, f"{essay_score}/{max_essay}" if max_essay > 0 else "0/0", 1, 1, 'L')
+        
+        pdf.cell(summary_col1, 10, 'Tong diem', 1, 0, 'L', 1)
         # Sử dụng điểm đã tính lại để đảm bảo chính xác
         pdf.cell(summary_col2, 10, f"{calculated_total_score}/{max_possible}", 1, 1, 'L')
         
         pdf.cell(summary_col1, 10, 'Ty le dung', 1, 0, 'L', 1)
         percent = total_correct/total_questions*100 if total_questions > 0 else 0
         pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Dat)' if percent >= 50 else '(Chua dat)'}", 1, 1, 'L')
+        
+        pdf.cell(summary_col1, 10, 'Ty le diem', 1, 0, 'L', 1)
+        score_percent = calculated_total_score/max_possible*100 if max_possible > 0 else 0
+        pdf.cell(summary_col2, 10, f"{score_percent:.1f}%", 1, 1, 'L')
         
         # Lưu PDF vào buffer - luôn sử dụng dest='S' để lấy bytes
         buffer = io.BytesIO()  # Đảm bảo buffer sạch
