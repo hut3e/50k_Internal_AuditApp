@@ -226,76 +226,87 @@ def format_date(date_value):
         print(f"Error formatting date: {e}, value type: {type(date_value)}, value: {date_value}")
         return "N/A"
 
-def get_download_link_docx(buffer, filename, text):
-    """Tạo link tải xuống cho file DOCX"""
+def get_buffer_content(buffer):
+    """Lấy nội dung từ buffer một cách an toàn"""
+    if buffer is None:
+        return None
+    
     try:
-        # Đảm bảo buffer không None
-        if buffer is None:
-            raise ValueError("Buffer is None")
-        
-        # Sử dụng getvalue() để lấy toàn bộ nội dung mà không thay đổi vị trí của buffer
-        content = buffer.getvalue()
-        
-        # Nếu getvalue() trả về None hoặc rỗng, thử đọc bằng read()
-        if not content:
-            buffer.seek(0)
-            content = buffer.read()
-            buffer.seek(0)
-        
-        # Kiểm tra nội dung có hợp lệ không
-        if not content or len(content) < 100:  # File DOCX tối thiểu khoảng vài trăm bytes
-            raise ValueError(f"Buffer content is too small or empty (length: {len(content) if content else 0})")
-        
-        # Kiểm tra signature của file DOCX (PK là zip signature)
-        if content[:2] != b'PK':
-            raise ValueError("Buffer does not contain valid DOCX file (missing ZIP signature)")
-        
-        b64 = base64.b64encode(content).decode()
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">📥 {text}</a>'
-        return href
-    except Exception as e:
-        print(f"Lỗi khi tạo download link DOCX: {e}")
-        import traceback
-        traceback.print_exc()
-        st.error(f"Lỗi khi tạo link tải xuống: {str(e)}")
-        return f'<p style="color:red;">Lỗi: Không thể tạo file tải xuống - {str(e)}</p>'
-
-def get_download_link_pdf(buffer, filename, text):
-    """Tạo link tải xuống cho file PDF"""
-    try:
-        # Đảm bảo buffer không None
-        if buffer is None:
-            raise ValueError("Buffer is None")
-        
         # Đảm bảo buffer ở đầu
+        current_pos = buffer.tell()
         buffer.seek(0)
         
-        # Sử dụng getvalue() để lấy toàn bộ nội dung
+        # Thử getvalue() trước
         content = buffer.getvalue()
         
-        # Nếu getvalue() trả về None hoặc rỗng, thử đọc bằng read()
+        # Nếu getvalue() trả về None hoặc rỗng, thử read()
         if not content:
-            buffer.seek(0)
             content = buffer.read()
             buffer.seek(0)
+        else:
+            # Reset lại vị trí ban đầu nếu đã move
+            buffer.seek(current_pos)
         
-        # Kiểm tra nội dung có hợp lệ không
-        if not content or len(content) < 100:  # File PDF tối thiểu khoảng vài trăm bytes
-            raise ValueError(f"Buffer content is too small or empty (length: {len(content) if content else 0})")
-        
-        # Kiểm tra signature của file PDF (bắt đầu bằng %PDF)
-        if not content.startswith(b'%PDF'):
-            raise ValueError("Buffer does not contain valid PDF file (missing PDF signature)")
-        
-        b64 = base64.b64encode(content).decode()
-        href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
-        return href
+        return content
     except Exception as e:
-        print(f"Lỗi khi tạo download link PDF: {e}")
+        print(f"Lỗi khi đọc buffer: {e}")
+        return None
+
+def create_download_button(buffer, file_type, filename, button_text):
+    """Tạo nút download sử dụng st.download_button"""
+    try:
+        # Lấy nội dung từ buffer
+        content = get_buffer_content(buffer)
+        
+        if content is None or len(content) < 100:
+            st.error(f"Không thể tạo file {file_type}: Buffer rỗng hoặc không hợp lệ")
+            return False
+        
+        # Kiểm tra signature
+        if file_type == "docx" and content[:2] != b'PK':
+            st.error("File DOCX không hợp lệ (thiếu signature ZIP)")
+            return False
+        elif file_type == "pdf" and not content.startswith(b'%PDF'):
+            st.error("File PDF không hợp lệ (thiếu signature %PDF)")
+            return False
+        
+        # Xác định MIME type
+        mime_types = {
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pdf": "application/pdf"
+        }
+        mime_type = mime_types.get(file_type, "application/octet-stream")
+        
+        # Tạo key duy nhất dựa trên filename, thời gian và hash của content
+        import hashlib
+        content_hash = hashlib.md5(content[:1000]).hexdigest()[:8]  # Lấy 8 ký tự đầu của hash
+        unique_key = f"dl_{file_type}_{hashlib.md5(filename.encode()).hexdigest()[:8]}_{content_hash}"
+        
+        # Sử dụng st.download_button
+        st.download_button(
+            label=button_text,
+            data=content,
+            file_name=filename,
+            mime=mime_type,
+            key=unique_key
+        )
+        return True
+    except Exception as e:
+        print(f"Lỗi khi tạo download button {file_type}: {e}")
         import traceback
         traceback.print_exc()
-        st.error(f"Lỗi khi tạo link tải xuống PDF: {str(e)}")
-        return f'<p style="color:red;">Lỗi: Không thể tạo file PDF tải xuống - {str(e)}</p>'
+        st.error(f"Lỗi khi tạo nút tải xuống: {str(e)}")
+        return False
+
+def get_download_link_docx(buffer, filename, text):
+    """Tạo download button cho file DOCX - tương thích ngược"""
+    # Sử dụng hàm mới với st.download_button
+    return create_download_button(buffer, "docx", filename, text)
+
+def get_download_link_pdf(buffer, filename, text):
+    """Tạo download button cho file PDF - tương thích ngược"""
+    # Sử dụng hàm mới với st.download_button
+    return create_download_button(buffer, "pdf", filename, text)
 
 def export_to_excel(dataframes, sheet_names, filename):
     """Tạo file Excel với nhiều sheet từ các DataFrame"""
@@ -1904,14 +1915,11 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                                 max_possible
                             )
                             
-                            if docx_buffer is None:
-                                st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
-                            else:
-                                st.markdown(
-                                    get_download_link_docx(docx_buffer, 
-                                                        f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
-                                                        "Tải xuống báo cáo chi tiết (DOCX)"), 
-                                    unsafe_allow_html=True
+                            if docx_buffer is not None:
+                                get_download_link_docx(
+                                    docx_buffer, 
+                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
+                                    "📥 Tải xuống báo cáo chi tiết (DOCX)"
                                 )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo DOCX: {str(e)}")
@@ -1930,15 +1938,12 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                                 max_possible
                             )
                             
-                            if pdf_buffer is None:
-                                st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                            else:
-                                st.markdown(
-                                    get_download_link_pdf(pdf_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
-                                                    "Tải xuống báo cáo chi tiết (PDF)"), 
-                                unsafe_allow_html=True
-                            )
+                            if pdf_buffer is not None:
+                                get_download_link_pdf(
+                                    pdf_buffer, 
+                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
+                                    "📥 Tải xuống báo cáo chi tiết (PDF)"
+                                )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo PDF: {str(e)}")
     else:
@@ -2424,11 +2429,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.docx")
-                    if docx_buffer is None:
-                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_tat_ca_bai_nop.docx", 
-                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is not None:
+                        get_download_link_docx(docx_buffer, "bao_cao_tat_ca_bai_nop.docx", "📥 Tải xuống báo cáo (DOCX)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2436,11 +2438,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF - sử dụng FPDF thay vì ReportLab
                     pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
-                    if pdf_buffer is None:
-                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", 
-                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is not None:
+                        get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2454,11 +2453,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.docx")
-                    if docx_buffer is None:
-                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_cau_hoi.docx", 
-                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is not None:
+                        get_download_link_docx(docx_buffer, "bao_cao_thong_ke_cau_hoi.docx", "📥 Tải xuống báo cáo (DOCX)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2466,11 +2462,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
-                    if pdf_buffer is None:
-                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", 
-                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is not None:
+                        get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2483,11 +2476,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.docx")
-                    if docx_buffer is None:
-                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_danh_sach_hoc_vien.docx", 
-                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is not None:
+                        get_download_link_docx(docx_buffer, "bao_cao_danh_sach_hoc_vien.docx", "📥 Tải xuống báo cáo (DOCX)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2495,11 +2485,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
-                    if pdf_buffer is None:
-                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", 
-                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is not None:
+                        get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2512,11 +2499,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.docx")
-                    if docx_buffer is None:
-                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_lop.docx", 
-                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is not None:
+                        get_download_link_docx(docx_buffer, "bao_cao_thong_ke_lop.docx", "📥 Tải xuống báo cáo (DOCX)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2524,11 +2508,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
-                    if pdf_buffer is None:
-                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                    else:
-                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", 
-                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is not None:
+                        get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2724,14 +2705,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                             # PDF
                             try:
                                 pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
-                                if pdf_buffer is None:
-                                    st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
-                                else:
-                                    st.markdown(
-                                        get_download_link_pdf(pdf_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
-                                                    "Tải xuống báo cáo PDF"), 
-                                        unsafe_allow_html=True
+                                if pdf_buffer is not None:
+                                    get_download_link_pdf(
+                                        pdf_buffer, 
+                                        f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
+                                        "📥 Tải xuống báo cáo PDF"
                                     )
                             except Exception as e:
                                 st.error(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
@@ -2753,14 +2731,12 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                         max_possible
                                     )
                                     
-                                    st.markdown(
+                                    if docx_buffer is not None:
                                         get_download_link_docx(
                                             docx_buffer, 
                                             f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.docx", 
-                                            f"Tải xuống báo cáo lần {idx+1} (DOCX)"
-                                        ), 
-                                        unsafe_allow_html=True
-                                    )
+                                            f"📥 Tải xuống báo cáo lần {idx+1} (DOCX)"
+                                        )
                                 except Exception as e:
                                     st.error(f"Lỗi khi tạo báo cáo DOCX lần {idx+1}: {str(e)}")
                             
@@ -2776,17 +2752,12 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                         max_possible
                                     )
                                     
-                                    if pdf_buffer is None:
-                                        st.error(f"Không thể tạo báo cáo PDF lần {idx+1}: Buffer rỗng")
-                                    else:
-                                        st.markdown(
-                                            get_download_link_pdf(
-                                                pdf_buffer, 
+                                    if pdf_buffer is not None:
+                                        get_download_link_pdf(
+                                            pdf_buffer, 
                                             f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.pdf", 
-                                            f"Tải xuống báo cáo lần {idx+1} (PDF)"
-                                        ), 
-                                        unsafe_allow_html=True
-                                    )
+                                            f"📥 Tải xuống báo cáo lần {idx+1} (PDF)"
+                                        )
                                 except Exception as e:
                                     st.error(f"Lỗi khi tạo báo cáo PDF lần {idx+1}: {str(e)}")
                         
