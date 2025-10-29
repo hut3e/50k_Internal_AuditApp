@@ -308,6 +308,35 @@ class UNIOCDF_FPDF(FPDF):
         # Thêm chân trang hệ thống
         self.cell(0, 10, 'Hệ thống Khảo sát & Đánh giá', 0, 0, 'R')
 
+# Helper: set font an toàn với fallback
+def _set_font_safe(pdf, style='', size=10):
+    """Set font với fallback nếu font không tồn tại"""
+    font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+    
+    # Map style
+    style_map = {
+        'B': 'B',
+        'I': 'I',
+        'BI': 'BI',
+        '': ''
+    }
+    font_style = style_map.get(style, '')
+    
+    try:
+        pdf.set_font(font_name, font_style, size)
+        return font_name
+    except:
+        try:
+            pdf.set_font('Arial', font_style, size)
+            return 'Arial'
+        except:
+            try:
+                pdf.set_font('Helvetica', font_style, size)
+                return 'Helvetica'
+            except:
+                pdf.set_font('Arial', '', size)  # Last resort - regular only
+                return 'Arial'
+
 # Helper: tính chiều cao cần thiết cho multi_cell với fpdf2
 def _measure_multicell_height(pdf, width, text, line_height=5):
     try:
@@ -322,6 +351,9 @@ def _measure_multicell_height(pdf, width, text, line_height=5):
 # Tạo một instance FPDF có khả năng xử lý Unicode
 def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
     """Tạo FPDF với hỗ trợ Unicode"""
+    pdf = None
+    font_name = None
+    
     try:
         # Kiểm tra xem font đã được tìm thấy chưa
         font_dirs = [
@@ -329,8 +361,8 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
             os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'fonts'),
             os.path.join(os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(), 'assets'),
             os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd(),
-            '/usr/share/fonts/truetype',
             '/usr/share/fonts/truetype/dejavu',
+            '/usr/share/fonts/truetype',
             '/usr/share/fonts/TTF',
             'C:\\Windows\\Fonts',
         ]
@@ -343,11 +375,14 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
             'DejaVuSans-Oblique.ttf': None
         }
         
+        # Tìm từng font file
         for font_dir in font_dirs:
             for font_file in font_paths:
-                if os.path.exists(os.path.join(font_dir, font_file)):
-                    font_paths[font_file] = os.path.join(font_dir, font_file)
+                font_path = os.path.join(font_dir, font_file)
+                if os.path.exists(font_path) and font_paths[font_file] is None:
+                    font_paths[font_file] = font_path
         
+        # Kiểm tra xem có đủ cả 3 font không
         if all(font_paths.values()):
             font_found = True
         
@@ -357,29 +392,66 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
         # Thiết lập mã hóa UTF-8
         pdf.set_doc_option('core_fonts_encoding', 'utf-8')
         
-        # Thêm các font Unicode
+        # Thêm các font Unicode nếu tìm thấy
         if font_found:
-            pdf.add_font('DejaVu', '', font_paths['DejaVuSans.ttf'], uni=True)
-            pdf.add_font('DejaVu', 'B', font_paths['DejaVuSans-Bold.ttf'], uni=True)
-            pdf.add_font('DejaVu', 'I', font_paths['DejaVuSans-Oblique.ttf'], uni=True)
-        else:
-            # Nếu không tìm thấy font DejaVu, thử dùng font mặc định
-            pdf.add_font('Arial', '', "arial.ttf", uni=True)
+            try:
+                pdf.add_font('DejaVu', '', font_paths['DejaVuSans.ttf'], uni=True)
+                pdf.add_font('DejaVu', 'B', font_paths['DejaVuSans-Bold.ttf'], uni=True)
+                pdf.add_font('DejaVu', 'I', font_paths['DejaVuSans-Oblique.ttf'], uni=True)
+                font_name = 'DejaVu'
+            except Exception as font_error:
+                print(f"Lỗi khi thêm font DejaVu: {font_error}")
+                font_found = False
+        
+        # Nếu không tìm thấy DejaVu, thử tìm font khác hoặc dùng built-in
+        if not font_found:
+            # Thử tìm Arial hoặc font hệ thống khác
+            arial_paths = ['arial.ttf', 'Arial.ttf', 'Arial.TTF']
+            arial_found = False
+            
+            for font_dir in font_dirs:
+                for arial_name in arial_paths:
+                    arial_path = os.path.join(font_dir, arial_name)
+                    if os.path.exists(arial_path):
+                        try:
+                            pdf.add_font('Arial', '', arial_path, uni=True)
+                            pdf.add_font('Arial', 'B', arial_path, uni=True)  # Dùng cùng font cho bold
+                            pdf.add_font('Arial', 'I', arial_path, uni=True)  # Dùng cùng font cho italic
+                            font_name = 'Arial'
+                            arial_found = True
+                            break
+                        except Exception as arial_error:
+                            print(f"Lỗi khi thêm font Arial: {arial_error}")
+                            continue
+                    if arial_found:
+                        break
+                if arial_found:
+                    break
+            
+            # Nếu vẫn không tìm thấy font Unicode, sử dụng built-in fonts (không hỗ trợ Unicode tốt)
+            if not arial_found:
+                font_name = 'Arial'  # FPDF built-in font (hạn chế Unicode)
+                print("Cảnh báo: Sử dụng built-in fonts, có thể không hiển thị đúng ký tự tiếng Việt")
         
         # Thiết lập các tùy chọn khác
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.alias_nb_pages()
         
+        # Lưu tên font đã sử dụng vào PDF object để dùng sau
+        pdf._active_font_name = font_name
+        
         return pdf
+        
     except Exception as e:
         print(f"Lỗi tạo PDF: {str(e)}")
         traceback.print_exc()
         
-        # Phương án dự phòng - sử dụng FPDF cơ bản
+        # Phương án dự phòng - sử dụng FPDF cơ bản với built-in fonts
         try:
             pdf = FPDF(orientation=orientation, format=format)
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.alias_nb_pages()
+            pdf._active_font_name = 'Arial'  # Built-in font
             return pdf
         except Exception as e2:
             print(f"Lỗi khi tạo PDF dự phòng: {str(e2)}")
@@ -401,14 +473,30 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         
         pdf.add_page()
         
-        # Thêm tiêu đề
-        pdf.set_font('DejaVu', 'B', 16)
+        # Lấy tên font đã được add (nếu có)
+        font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+        
+        # Thêm tiêu đề - sử dụng font đã được add
+        try:
+            pdf.set_font(font_name, 'B', 16)
+        except:
+            try:
+                pdf.set_font('Arial', 'B', 16)  # Fallback to built-in
+                font_name = 'Arial'
+            except:
+                pdf.set_font('Helvetica', 'B', 16)  # Last resort
+                font_name = 'Helvetica'
+        
         pdf.cell(0, 10, title, 0, 1, 'C')
         
         # Thêm thời gian báo cáo
-        pdf.set_font('DejaVu', 'I', 10)
+        try:
+            pdf.set_font(font_name, 'I', 10)
+        except:
+            pdf.set_font(font_name, '', 10)  # Nếu không có italic, dùng regular
+            
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        pdf.cell(0, 5, f'Thời gian xuất báo cao: {timestamp}', 0, 1, 'R')
         pdf.ln(5)
         
         # Xác định kích thước trang và số cột
@@ -421,7 +509,10 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         max_content_widths = []
         
         # Mặc định font cho nội dung
-        pdf.set_font('DejaVu', '', 9)
+        try:
+            pdf.set_font(font_name, '', 9)
+        except:
+            pdf.set_font('Arial', '', 9)
         
         # Ước tính độ rộng tối đa cho mỗi cột
         for i, col in enumerate(df.columns):
@@ -455,7 +546,7 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             col_widths = [width * scale_factor for width in col_widths]
         
         # Tạo tiêu đề cột
-        pdf.set_font('DejaVu', 'B', 10)
+        _set_font_safe(pdf, 'B', 10)
         pdf.set_fill_color(240, 240, 240)
         
         # Lưu vị trí bắt đầu
@@ -478,7 +569,7 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         pdf.ln(header_height)
         
         # Vẽ nội dung với font nhỏ hơn
-        pdf.set_font('DejaVu', '', 8)
+        _set_font_safe(pdf, '', 8)
         
         # Chiều cao dòng cơ bản
         row_height = 7
@@ -844,14 +935,30 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         
         pdf.add_page()
         
-        # Thiết lập font cho tiêu đề
-        pdf.set_font('DejaVu', 'B', 16)
+        # Lấy tên font đã được add (nếu có)
+        font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+        
+        # Thiết lập font cho tiêu đề - sử dụng font đã được add
+        try:
+            pdf.set_font(font_name, 'B', 16)
+        except:
+            try:
+                pdf.set_font('Arial', 'B', 16)  # Fallback to built-in
+                font_name = 'Arial'
+            except:
+                pdf.set_font('Helvetica', 'B', 16)  # Last resort
+                font_name = 'Helvetica'
+        
         pdf.cell(0, 10, title, 0, 1, 'C')
         
         # Thêm thời gian báo cáo
-        pdf.set_font('DejaVu', 'I', 10)
+        try:
+            pdf.set_font(font_name, 'I', 10)
+        except:
+            pdf.set_font(font_name, '', 10)  # Nếu không có italic, dùng regular
+            
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        pdf.cell(0, 5, f'Thời gian xuất báo cáo: {timestamp}', 0, 1, 'R')
+        pdf.cell(0, 5, f'Thoi gian xuat bao cao: {timestamp}', 0, 1, 'R')
         pdf.ln(5)
         
         # Tính toán thông tin về bài làm
@@ -881,37 +988,37 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
                 pass
         
         # Thông tin học viên
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Thông tin học viên', 0, 1, 'L')
+        _set_font_safe(pdf, 'B', 12)
+        pdf.cell(0, 10, 'Thong tin hoc vien', 0, 1, 'L')
         
         # Bảng thông tin học viên
-        pdf.set_font('DejaVu', '', 10)
+        _set_font_safe(pdf, '', 10)
         info_width = 190
         col1_width = 50
         col2_width = info_width - col1_width
         
         # Tạo khung thông tin học viên
         pdf.set_fill_color(240, 240, 240)
-        pdf.cell(col1_width, 10, 'Họ và tên', 1, 0, 'L', 1)
+        pdf.cell(col1_width, 10, 'Ho va ten', 1, 0, 'L', 1)
         pdf.cell(col2_width, 10, student_name, 1, 1, 'L')
         
         pdf.cell(col1_width, 10, 'Email', 1, 0, 'L', 1)
         pdf.cell(col2_width, 10, student_email, 1, 1, 'L')
         
-        pdf.cell(col1_width, 10, 'Lớp', 1, 0, 'L', 1)
+        pdf.cell(col1_width, 10, 'Lop', 1, 0, 'L', 1)
         pdf.cell(col2_width, 10, student_class, 1, 1, 'L')
         
-        pdf.cell(col1_width, 10, 'Thời gian nộp', 1, 0, 'L', 1)
+        pdf.cell(col1_width, 10, 'Thoi gian nop', 1, 0, 'L', 1)
         pdf.cell(col2_width, 10, submission_time, 1, 1, 'L')
         
         pdf.ln(5)
         
         # Chi tiết câu trả lời
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Chi tiết câu trả lời', 0, 1, 'L')
+        _set_font_safe(pdf, 'B', 12)
+        pdf.cell(0, 10, 'Chi tiet cau tra loi', 0, 1, 'L')
         
         # Tiêu đề bảng chi tiết
-        pdf.set_font('DejaVu', 'B', 9)
+        _set_font_safe(pdf, 'B', 9)
         pdf.set_fill_color(240, 240, 240)
         
         # Xác định độ rộng cột - điều chỉnh phù hợp với nội dung
@@ -935,14 +1042,14 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             points_width *= scale
         
         # Vẽ header bảng
-        pdf.cell(q_width, 10, 'Câu hỏi', 1, 0, 'C', 1)
-        pdf.cell(user_width, 10, 'Đáp án học viên', 1, 0, 'C', 1)
-        pdf.cell(correct_width, 10, 'Đáp án đúng', 1, 0, 'C', 1)
-        pdf.cell(result_width, 10, 'Kết quả', 1, 0, 'C', 1)
-        pdf.cell(points_width, 10, 'Điểm', 1, 1, 'C', 1)
+        pdf.cell(q_width, 10, 'Cau hoi', 1, 0, 'C', 1)
+        pdf.cell(user_width, 10, 'Dap an HV', 1, 0, 'C', 1)
+        pdf.cell(correct_width, 10, 'Dap an dung', 1, 0, 'C', 1)
+        pdf.cell(result_width, 10, 'Ket qua', 1, 0, 'C', 1)
+        pdf.cell(points_width, 10, 'Diem', 1, 1, 'C', 1)
         
         # Vẽ dữ liệu câu trả lời
-        pdf.set_font('DejaVu', '', 9)
+        _set_font_safe(pdf, '', 9)
         
         for q in questions:
             q_id = str(q.get("id", ""))
@@ -1046,25 +1153,25 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         pdf.ln(5)
         
         # Tổng kết
-        pdf.set_font('DejaVu', 'B', 12)
-        pdf.cell(0, 10, 'Tổng kết', 0, 1, 'L')
+        _set_font_safe(pdf, 'B', 12)
+        pdf.cell(0, 10, 'Tong ket', 0, 1, 'L')
         
         # Bảng tổng kết
-        pdf.set_font('DejaVu', '', 10)
+        _set_font_safe(pdf, '', 10)
         pdf.set_fill_color(240, 240, 240)
         
         summary_col1 = 50
         summary_col2 = 140
         
-        pdf.cell(summary_col1, 10, 'Số câu đúng', 1, 0, 'L', 1)
+        pdf.cell(summary_col1, 10, 'So cau dung', 1, 0, 'L', 1)
         pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
         
-        pdf.cell(summary_col1, 10, 'Điểm số', 1, 0, 'L', 1)
+        pdf.cell(summary_col1, 10, 'Diem so', 1, 0, 'L', 1)
         pdf.cell(summary_col2, 10, f"{submission.get('score', 0)}/{max_possible}", 1, 1, 'L')
         
-        pdf.cell(summary_col1, 10, 'Tỷ lệ đúng', 1, 0, 'L', 1)
+        pdf.cell(summary_col1, 10, 'Ty le dung', 1, 0, 'L', 1)
         percent = total_correct/total_questions*100 if total_questions > 0 else 0
-        pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Đạt)' if percent >= 50 else '(Chưa đạt)'}", 1, 1, 'L')
+        pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Dat)' if percent >= 50 else '(Chua dat)'}", 1, 1, 'L')
         
         # Lưu PDF vào buffer
         try:
