@@ -1206,17 +1206,56 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
         students = []
     if questions is None:
         questions = []
-        
+    
+    # Đảm bảo load lại students nếu chưa có
+    if not students:
+        try:
+            students = get_all_users(role="Học viên")
+            if not students:
+                # Thử load tất cả users
+                all_users = get_all_users(role=None)
+                if all_users:
+                    students = [u for u in all_users if u.get("role") == "Học viên"]
+        except Exception as e:
+            st.error(f"❌ Lỗi khi load danh sách học viên: {str(e)}")
+            students = []
+    
     st.subheader("Chi tiết theo học viên")
+    
+    # Tạo dict để lookup nhanh hơn (email -> student info)
+    students_dict = {student.get("email", ""): student for student in students if student.get("email")}
+    
+    if not students_dict and students:
+        st.warning("⚠️ Không thể tạo danh sách học viên. Kiểm tra dữ liệu email.")
     
     # Tạo DataFrame từ dữ liệu
     user_data = []
     for s in submissions:
         try:
-            # Tìm thông tin học viên
-            student_info = next((student for student in students if student.get("email") == s.get("user_email")), None)
-            full_name = student_info.get("full_name", "Không xác định") if student_info else "Không xác định"
-            class_name = student_info.get("class", "Không xác định") if student_info else "Không xác định"
+            user_email = s.get("user_email", "")
+            # Tìm thông tin học viên từ dict (nhanh hơn)
+            student_info = students_dict.get(user_email)
+            
+            if student_info:
+                full_name = student_info.get("full_name", "Không xác định")
+                class_name = student_info.get("class", "Chưa phân lớp")
+            else:
+                # Nếu không tìm thấy trong students list, thử query trực tiếp từ DB
+                try:
+                    from database_helper import get_all_users
+                    all_students = get_all_users(role="Học viên")
+                    student_info = next((st for st in all_students if st.get("email") == user_email), None)
+                    if student_info:
+                        full_name = student_info.get("full_name", "Không xác định")
+                        class_name = student_info.get("class", "Chưa phân lớp")
+                        # Cập nhật vào dict để dùng lần sau
+                        students_dict[user_email] = student_info
+                    else:
+                        full_name = "Không xác định"
+                        class_name = "Không xác định"
+                except:
+                    full_name = "Không xác định"
+                    class_name = "Không xác định"
             
             # Xử lý timestamp
             submission_time = "Không xác định"
@@ -1271,9 +1310,30 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
         if class_filter != "Tất cả":
             df_filtered = df_filtered[df_filtered["class"] == class_filter]
         
-        # Hiển thị bảng
+        # Hiển thị bảng với đầy đủ cột
+        columns_to_show = ["email", "full_name", "class", "timestamp", "score", "max_score", "percent"]
+        if "submission_id" in df_filtered.columns:
+            columns_to_show.insert(0, "submission_id")
+        
+        # Đảm bảo tất cả cột tồn tại
+        available_columns = [col for col in columns_to_show if col in df_filtered.columns]
+        df_display = df_filtered[available_columns].copy()
+        
+        # Đổi tên cột cho dễ đọc
+        column_mapping = {
+            "email": "Email",
+            "full_name": "Họ và tên",
+            "class": "Lớp",
+            "timestamp": "Thời gian nộp",
+            "score": "Điểm số",
+            "max_score": "Điểm tối đa",
+            "percent": "Tỷ lệ",
+            "submission_id": "ID bài nộp"
+        }
+        df_display = df_display.rename(columns=column_mapping)
+        
         st.dataframe(
-            df_filtered.sort_values(by="timestamp", ascending=False),
+            df_display.sort_values(by="Thời gian nộp", ascending=False),
             use_container_width=True,
             hide_index=True
         )
@@ -1713,19 +1773,40 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
         submissions = []
     if students is None:
         students = []
-        
+    
     st.subheader("Danh sách học viên")
     
+    # Đảm bảo load lại students nếu chưa có
     if not students:
-        st.info("Chưa có học viên nào đăng ký")
-        return pd.DataFrame(), pd.DataFrame()
+        try:
+            students = get_all_users(role="Học viên")
+            if not students:
+                # Thử load tất cả users (không filter role)
+                all_users = get_all_users(role=None)
+                if all_users:
+                    students = [u for u in all_users if u.get("role") == "Học viên"]
+                
+                if not students:
+                    st.warning("⚠️ Không thể load danh sách học viên từ Supabase. Vui lòng kiểm tra kết nối.")
+                    st.info("💡 Gợi ý: Kiểm tra xem bảng 'users' trong Supabase có dữ liệu không.")
+                    return pd.DataFrame(), pd.DataFrame()
+        except Exception as e:
+            st.error(f"❌ Lỗi khi load danh sách học viên: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
+            return pd.DataFrame(), pd.DataFrame()
     
-    # Chuẩn bị dữ liệu
+    st.info(f"📋 Tổng số học viên: {len(students)}")
+    
+    # Chuẩn bị dữ liệu - Đảm bảo HIỂN THỊ TẤT CẢ học viên (kể cả chưa làm bài)
     student_data = []
     for student in students:
         try:
             # Tìm tất cả bài nộp của học viên
             student_email = student.get("email", "")
+            if not student_email:
+                continue  # Bỏ qua nếu không có email
+                
             student_submissions = [s for s in submissions if s.get("user_email") == student_email]
             submission_count = len(student_submissions)
             
@@ -1735,30 +1816,56 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
             # Thời gian đăng ký
             registration_date = format_date(student.get("registration_date"))
             
+            # Đảm bảo lấy đầy đủ thông tin từ student dict
+            full_name = student.get("full_name", "") or "Chưa có tên"
+            class_name = student.get("class", "") or "Chưa phân lớp"
+            
             student_data.append({
-                "full_name": student.get("full_name", ""),
+                "full_name": full_name,
                 "email": student_email,
-                "class": student.get("class", ""),
+                "class": class_name,
                 "registration_date": registration_date,
                 "submission_count": submission_count,
                 "max_score": max_student_score,
                 "max_possible": max_possible,
-                "percent": f"{(max_student_score/max_possible*100):.1f}%" if max_possible > 0 else "N/A"
+                "percent": f"{(max_student_score/max_possible*100):.1f}%" if max_possible > 0 and max_student_score > 0 else ("0%" if max_possible > 0 else "N/A")
             })
         except Exception as e:
-            st.error(f"Lỗi khi xử lý dữ liệu học viên {student.get('email', '')}: {str(e)}")
+            st.warning(f"⚠️ Lỗi khi xử lý dữ liệu học viên {student.get('email', 'N/A')}: {str(e)}")
+            # Vẫn thêm vào danh sách với dữ liệu cơ bản
+            try:
+                student_data.append({
+                    "full_name": student.get("full_name", "Lỗi"),
+                    "email": student.get("email", "N/A"),
+                    "class": student.get("class", "Lỗi"),
+                    "registration_date": format_date(student.get("registration_date")),
+                    "submission_count": 0,
+                    "max_score": 0,
+                    "max_possible": max_possible,
+                    "percent": "N/A"
+                })
+            except:
+                pass
+    
+    # Đảm bảo có dữ liệu để hiển thị
+    if not student_data:
+        st.warning("⚠️ Không có dữ liệu học viên để hiển thị.")
+        # Vẫn tạo DataFrame trống với cột đầy đủ
+        df_students_list = pd.DataFrame(columns=["Họ và tên", "Email", "Lớp", "Ngày đăng ký", "Số lần làm bài", "Điểm cao nhất", "Điểm tối đa", "Tỷ lệ đúng"])
+        df_class_stats = pd.DataFrame()
+        return df_students_list, df_class_stats
     
     # DataFrame cho danh sách học viên
     students_list_data = [
         {
-            "Họ và tên": s["full_name"],
-            "Email": s["email"],
-            "Lớp": s["class"],
-            "Ngày đăng ký": s["registration_date"],
-            "Số lần làm bài": s["submission_count"],
-            "Điểm cao nhất": s["max_score"],
-            "Điểm tối đa": s["max_possible"],
-            "Tỷ lệ đúng": s["percent"]
+            "Họ và tên": s.get("full_name", "Chưa có tên"),
+            "Email": s.get("email", "N/A"),
+            "Lớp": s.get("class", "Chưa phân lớp"),
+            "Ngày đăng ký": s.get("registration_date", "N/A"),
+            "Số lần làm bài": s.get("submission_count", 0),
+            "Điểm cao nhất": s.get("max_score", 0),
+            "Điểm tối đa": s.get("max_possible", 0),
+            "Tỷ lệ đúng": s.get("percent", "N/A")
         } for s in student_data
     ]
     
@@ -2205,7 +2312,15 @@ def view_statistics():
     try:
         # Lấy dữ liệu từ database
         questions = get_all_questions()
+        
+        # Lấy TẤT CẢ học viên từ database (không chỉ những người đã nộp bài)
         students = get_all_users(role="Học viên")
+        
+        # Debug: hiển thị số lượng học viên được load
+        if students:
+            st.sidebar.info(f"📊 Đã load {len(students)} học viên từ database")
+        else:
+            st.sidebar.warning("⚠️ Không tìm thấy học viên nào trong database")
         
         # Tạo form tìm kiếm email nếu muốn xem báo cáo theo học viên cụ thể
         with st.sidebar:
