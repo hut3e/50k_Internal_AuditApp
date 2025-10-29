@@ -262,9 +262,40 @@ def get_download_link_docx(buffer, filename, text):
 
 def get_download_link_pdf(buffer, filename, text):
     """Tạo link tải xuống cho file PDF"""
-    b64 = base64.b64encode(buffer.getvalue()).decode()
-    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
-    return href
+    try:
+        # Đảm bảo buffer không None
+        if buffer is None:
+            raise ValueError("Buffer is None")
+        
+        # Đảm bảo buffer ở đầu
+        buffer.seek(0)
+        
+        # Sử dụng getvalue() để lấy toàn bộ nội dung
+        content = buffer.getvalue()
+        
+        # Nếu getvalue() trả về None hoặc rỗng, thử đọc bằng read()
+        if not content:
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+        
+        # Kiểm tra nội dung có hợp lệ không
+        if not content or len(content) < 100:  # File PDF tối thiểu khoảng vài trăm bytes
+            raise ValueError(f"Buffer content is too small or empty (length: {len(content) if content else 0})")
+        
+        # Kiểm tra signature của file PDF (bắt đầu bằng %PDF)
+        if not content.startswith(b'%PDF'):
+            raise ValueError("Buffer does not contain valid PDF file (missing PDF signature)")
+        
+        b64 = base64.b64encode(content).decode()
+        href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">📥 {text}</a>'
+        return href
+    except Exception as e:
+        print(f"Lỗi khi tạo download link PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Lỗi khi tạo link tải xuống PDF: {str(e)}")
+        return f'<p style="color:red;">Lỗi: Không thể tạo file PDF tải xuống - {str(e)}</p>'
 
 def export_to_excel(dataframes, sheet_names, filename):
     """Tạo file Excel với nhiều sheet từ các DataFrame"""
@@ -792,44 +823,87 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         
         # Lưu PDF vào buffer
         try:
+            # Thử dùng dest=buffer trước (fpdf2)
             pdf.output(dest=buffer)
-        except TypeError:
+            buffer.flush()
+        except (TypeError, AttributeError):
             # Fallback cho fpdf2: output có thể trả về bytes
             try:
                 pdf_bytes = pdf.output(dest='S')
                 if isinstance(pdf_bytes, str):
                     pdf_bytes = pdf_bytes.encode('latin-1')
+                elif not isinstance(pdf_bytes, bytes):
+                    pdf_bytes = bytes(pdf_bytes)
                 buffer.write(pdf_bytes)
-            except Exception:
-                # Cuối cùng: thử encode latin-1
+                buffer.flush()
+            except Exception as fallback_error:
+                # Cuối cùng: thử các cách khác
                 try:
-                    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                    pdf_bytes = pdf.output(dest='S')
+                    if isinstance(pdf_bytes, str):
+                        pdf_bytes = pdf_bytes.encode('latin-1')
                     buffer.write(pdf_bytes)
+                    buffer.flush()
                 except Exception:
-                    buffer.write(pdf.output(dest='S'))
+                    # Last resort: tạo buffer mới
+                    buffer = io.BytesIO()
+                    pdf_bytes = pdf.output(dest='S')
+                    if isinstance(pdf_bytes, str):
+                        pdf_bytes = pdf_bytes.encode('latin-1')
+                    buffer.write(pdf_bytes)
+                    buffer.flush()
+        
+        # Đảm bảo buffer ở đầu và có dữ liệu hợp lệ
+        buffer.seek(0)
+        content = buffer.getvalue()
+        
+        # Kiểm tra signature PDF
+        if not content or len(content) < 100:
+            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+        
+        if not content.startswith(b'%PDF'):
+            raise ValueError("PDF buffer does not contain valid PDF (missing %PDF signature)")
+        
+        buffer.seek(0)
+        return buffer
         
     except Exception as e:
-        print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
+        print(f"Lỗi khi tạo PDF: {str(e)}")
+        import traceback
         traceback.print_exc()
         
         # Tạo báo cáo đơn giản nếu gặp lỗi
         try:
+            buffer = io.BytesIO()  # Tạo buffer mới
             simple_pdf = FPDF()
             simple_pdf.add_page()
             simple_pdf.set_font('Arial', 'B', 16)
             simple_pdf.cell(0, 10, title, 0, 1, 'C')
             simple_pdf.set_font('Arial', '', 10)
-            simple_pdf.multi_cell(0, 10, f'Không thể tạo báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}', 0, 'L')
+            error_msg = f'Khong the tao bao cao chi tiet. Vui long su dung dinh dang DOCX hoac Excel.\nLoi: {str(e)[:100]}'
+            simple_pdf.multi_cell(0, 10, error_msg, 0, 'L')
+            
             try:
-                pdf_bytes = simple_pdf.output(dest='S').encode('latin-1')
-            except Exception:
                 pdf_bytes = simple_pdf.output(dest='S')
-            buffer.write(pdf_bytes)
+                if isinstance(pdf_bytes, str):
+                    pdf_bytes = pdf_bytes.encode('latin-1')
+                buffer.write(pdf_bytes)
+                buffer.flush()
+            except Exception:
+                simple_pdf.output(dest=buffer)
+                buffer.flush()
+            
+            buffer.seek(0)
+            
+            # Kiểm tra lại
+            content = buffer.getvalue()
+            if content and len(content) > 100 and content.startswith(b'%PDF'):
+                return buffer
+            else:
+                return None
         except Exception as e2:
             print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
-    
-    buffer.seek(0)
-    return buffer
+            return None
 def create_student_report_docx(student_name, student_email, student_class, submission, questions, max_possible):
     """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX"""
     try:
@@ -1380,43 +1454,87 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         
         # Lưu PDF vào buffer
         try:
+            # Thử dùng dest=buffer trước (fpdf2)
             pdf.output(dest=buffer)
-        except TypeError:
+            buffer.flush()
+        except (TypeError, AttributeError):
+            # Fallback cho fpdf2: output có thể trả về bytes
             try:
                 pdf_bytes = pdf.output(dest='S')
                 if isinstance(pdf_bytes, str):
                     pdf_bytes = pdf_bytes.encode('latin-1')
+                elif not isinstance(pdf_bytes, bytes):
+                    pdf_bytes = bytes(pdf_bytes)
                 buffer.write(pdf_bytes)
-            except Exception:
-                buffer.write(pdf.output(dest='S'))
+                buffer.flush()
+            except Exception as fallback_error:
+                # Cuối cùng: thử các cách khác
+                try:
+                    pdf_bytes = pdf.output(dest='S')
+                    if isinstance(pdf_bytes, str):
+                        pdf_bytes = pdf_bytes.encode('latin-1')
+                    buffer.write(pdf_bytes)
+                    buffer.flush()
+                except Exception:
+                    # Last resort: tạo buffer mới
+                    buffer = io.BytesIO()
+                    pdf_bytes = pdf.output(dest='S')
+                    if isinstance(pdf_bytes, str):
+                        pdf_bytes = pdf_bytes.encode('latin-1')
+                    buffer.write(pdf_bytes)
+                    buffer.flush()
+        
+        # Đảm bảo buffer ở đầu và có dữ liệu hợp lệ
+        buffer.seek(0)
+        content = buffer.getvalue()
+        
+        # Kiểm tra signature PDF
+        if not content or len(content) < 100:
+            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+        
+        if not content.startswith(b'%PDF'):
+            raise ValueError("PDF buffer does not contain valid PDF (missing %PDF signature)")
+        
+        buffer.seek(0)
+        return buffer
+        
     except Exception as e:
-        print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
+        print(f"Lỗi khi tạo báo cáo PDF học viên: {str(e)}")
+        import traceback
         traceback.print_exc()
         
         # Tạo báo cáo đơn giản nếu gặp lỗi
         try:
+            buffer = io.BytesIO()  # Tạo buffer mới
             simple_pdf = FPDF()
             simple_pdf.add_page()
             simple_pdf.set_font('Arial', 'B', 16)
-            simple_pdf.cell(0, 10, f'Báo cáo chi tiết - {student_name}', 0, 1, 'C')
+            simple_pdf.cell(0, 10, f'Bao cao chi tiet - {student_name}', 0, 1, 'C')
             simple_pdf.set_font('Arial', '', 10)
-            error_text = f'Không thể hiển thị báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}'
-            simple_pdf.multi_cell(0, 10, error_text, 0, 'L')
+            error_msg = f'Khong the hien thi bao cao chi tiet. Vui long su dung dinh dang DOCX hoac Excel.\nLoi: {str(e)[:100]}'
+            simple_pdf.multi_cell(0, 10, error_msg, 0, 'L')
+            
             try:
+                pdf_bytes = simple_pdf.output(dest='S')
+                if isinstance(pdf_bytes, str):
+                    pdf_bytes = pdf_bytes.encode('latin-1')
+                buffer.write(pdf_bytes)
+                buffer.flush()
+            except Exception:
                 simple_pdf.output(dest=buffer)
-            except TypeError:
-                try:
-                    pdf_bytes = simple_pdf.output(dest='S')
-                    if isinstance(pdf_bytes, str):
-                        pdf_bytes = pdf_bytes.encode('latin-1')
-                    buffer.write(pdf_bytes)
-                except Exception:
-                    buffer.write(simple_pdf.output(dest='S'))
+                buffer.flush()
+            
+            buffer.seek(0)
+            
+            # Kiểm tra lại
+            content = buffer.getvalue()
+            if content and len(content) > 100 and content.startswith(b'%PDF'):
+                return buffer
+            else:
+                return None
         except Exception as e2:
             print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
-    
-    buffer.seek(0)
-    return buffer
+            return None
 
 def display_overview_tab(submissions=None, students=None, questions=None, max_possible=0):
     """Hiển thị tab tổng quan"""
@@ -1812,8 +1930,11 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                                 max_possible
                             )
                             
-                            st.markdown(
-                                get_download_link_pdf(pdf_buffer, 
+                            if pdf_buffer is None:
+                                st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                            else:
+                                st.markdown(
+                                    get_download_link_pdf(pdf_buffer, 
                                                     f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
                                                     "Tải xuống báo cáo chi tiết (PDF)"), 
                                 unsafe_allow_html=True
@@ -2315,8 +2436,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF - sử dụng FPDF thay vì ReportLab
                     pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
-                    st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", 
-                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is None:
+                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", 
+                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2342,8 +2466,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
-                    st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", 
-                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is None:
+                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", 
+                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2368,8 +2495,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
-                    st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", 
-                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is None:
+                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", 
+                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2394,8 +2524,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # PDF
                     pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
-                    st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", 
-                                                "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
+                    if pdf_buffer is None:
+                        st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", 
+                                                    "Tải xuống báo cáo (PDF)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo PDF: {str(e)}")
         
@@ -2589,13 +2722,19 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         
                         with col2:
                             # PDF
-                            pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
-                            st.markdown(
-                                get_download_link_pdf(pdf_buffer, 
+                            try:
+                                pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
+                                if pdf_buffer is None:
+                                    st.error("Không thể tạo báo cáo PDF: Buffer rỗng")
+                                else:
+                                    st.markdown(
+                                        get_download_link_pdf(pdf_buffer, 
                                                     f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
                                                     "Tải xuống báo cáo PDF"), 
-                                unsafe_allow_html=True
-                            )
+                                        unsafe_allow_html=True
+                                    )
+                            except Exception as e:
+                                st.error(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
                         
                         # Tạo báo cáo chi tiết cho từng lần làm
                         st.write("### Tải báo cáo chi tiết từng lần làm")
@@ -2637,9 +2776,12 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                         max_possible
                                     )
                                     
-                                    st.markdown(
-                                        get_download_link_pdf(
-                                            pdf_buffer, 
+                                    if pdf_buffer is None:
+                                        st.error(f"Không thể tạo báo cáo PDF lần {idx+1}: Buffer rỗng")
+                                    else:
+                                        st.markdown(
+                                            get_download_link_pdf(
+                                                pdf_buffer, 
                                             f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.pdf", 
                                             f"Tải xuống báo cáo lần {idx+1} (PDF)"
                                         ), 
