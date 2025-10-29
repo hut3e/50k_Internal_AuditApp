@@ -498,29 +498,46 @@ def get_submission_statistics():
 def get_all_users(role=None):
     """Lấy danh sách tất cả người dùng, có thể lọc theo vai trò"""
     try:
-        # Sửa lỗi: Lấy client Supabase đúng cách
         supabase = get_supabase_client()
         if not supabase:
             st.error("Không thể kết nối đến Supabase.")
             return []
-            
-        if role:
-            response = supabase.table('users').select('*').eq('role', role).execute()
-        else:
-            response = supabase.table('users').select('*').execute()
+        
+        # Lấy tất cả users từ database
+        try:
+            if role:
+                response = supabase.table('users').select('*').eq('role', role).execute()
+            else:
+                response = supabase.table('users').select('*').execute()
+        except Exception as query_error:
+            print(f"Lỗi query Supabase: {query_error}")
+            st.error(f"Lỗi khi truy vấn bảng 'users': {str(query_error)}")
+            return []
+        
+        if not response.data:
+            print(f"Không có dữ liệu users trong database (role={role})")
+            return []
         
         users = []
         for user in response.data:
-            users.append({
-                "email": user["email"],
-                "role": user["role"],
-                "full_name": user.get("full_name", ""),
-                "class": user.get("class", ""),
-                "registration_date": user.get("registration_date")
-            })
+            try:
+                users.append({
+                    "email": user.get("email", ""),
+                    "role": user.get("role", ""),
+                    "full_name": user.get("full_name", "") or user.get("fullname", "") or "",
+                    "class": user.get("class", "") or user.get("class_name", "") or "",
+                    "registration_date": user.get("registration_date") or user.get("created_at")
+                })
+            except Exception as user_error:
+                print(f"Lỗi khi xử lý user {user.get('email', 'N/A')}: {user_error}")
+                continue
+        
+        print(f"Đã load {len(users)} users từ database (role={role})")
         return users
     except Exception as e:
         print(f"Error getting users: {e}")
+        import traceback
+        traceback.print_exc()
         st.error(f"Lỗi khi lấy danh sách người dùng: {e}")
         return []
 
