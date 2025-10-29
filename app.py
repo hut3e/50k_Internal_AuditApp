@@ -15,7 +15,42 @@ from question_manager import manage_questions
 from surveyhandler import survey_form
 from stats_dashboard import stats_dashboard
 from admin_dashboard import admin_dashboard
-from database_helper import get_supabase_client, check_supabase_config, get_user, create_user_if_not_exists
+from database_helper import get_supabase_client, check_supabase_config, get_user
+
+# Import với fallback cho create_user_if_not_exists
+try:
+    from database_helper import create_user_if_not_exists
+except ImportError:
+    # Nếu hàm chưa có, định nghĩa lại
+    def create_user_if_not_exists(email, password, full_name="", role="Học viên", class_name=""):
+        """Tạo người dùng mới nếu chưa tồn tại"""
+        from database_helper import get_supabase_client
+        from datetime import datetime
+        try:
+            supabase = get_supabase_client()
+            if not supabase:
+                return False
+            
+            # Kiểm tra email đã tồn tại
+            existing = supabase.table('users').select('email').eq('email', email).execute()
+            if existing.data:
+                return False
+            
+            # Tạo user mới
+            user_data = {
+                "email": email,
+                "password": password,
+                "full_name": full_name,
+                "role": role,
+                "class": class_name,
+                "registration_date": datetime.now().isoformat()
+            }
+            result = supabase.table('users').insert(user_data).execute()
+            return bool(result.data)
+        except Exception as e:
+            st.error(f"Lỗi khi tạo người dùng: {e}")
+            return False
+
 from PIL import Image, UnidentifiedImageError
 
 # ------------ Cấu hình logo 2×3 cm ~ 76×113 px ------------
@@ -95,7 +130,7 @@ def display_logos():
                 st.error(f"Lỗi khi hiển thị logo {logo_path}: {e}")
         
         # Hiển thị tiêu đề ứng dụng ở giữa
-        st.title("KARCHER VIETNAM INTERNAL AUDIT ISO 50001 TRAINING APP")
+        st.title("TRAINING INTERNAL AUDIT ISO 50001 TEST APP")
     
     # Phần tải lên logo mới - ẩn trong expander để không chiếm nhiều không gian
     with st.expander("Cấu hình logo"):
@@ -138,7 +173,7 @@ def display_logos():
 
 def main():
     st.set_page_config(
-        page_title="Hệ thống kiểm tra học viên Karcher theo Tiêu chuẩn ISO 50001:2018",
+        page_title="Hệ thống kiểm tra học viên sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -165,7 +200,7 @@ def main():
     
     # Sidebar - Menu điều hướng
     with st.sidebar:
-        st.title("📝 Hệ thống kiểm tra học viên Karcher theo Tiêu chuẩn ISO 50001:2018")
+        st.title("📝 Hệ thống kiểm tra học viên sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018")
         st.success("Đã kết nối thành công đến Supabase!")
         
         # Hiển thị thông tin dự án (ẩn key)
@@ -328,7 +363,7 @@ def main():
                     st.info("Bạn chưa có bài làm nào. Hãy làm bài khảo sát ở tab 'Làm bài khảo sát'.")
     else:
         # Màn hình chào mừng
-        st.header("Chào mừng các Bạn học viên Công ty Karcher Việt Nam tham gia khóa Đào tạo ISO 50001:2018 !")
+        st.header("Chào mừng các Bạn học viên Công ty TNHH Karcher Việt Nam tham gia khóa Đào tạo ISO 50001:2018 !")
         
         st.markdown("""
         ### Tính năng chính:
@@ -347,7 +382,7 @@ def main():
         """)
         
         # Hiển thị một số thông tin demo
-        with st.expander("Thông tin App kiểm tra sau Đào tạo Karcher Tiêu chuẩn ISO 50001:2018"):
+        with st.expander("Thông tin App kiểm tra sau Đào tạo Đánh giá viên nội bộ ISO 50001:2018"):
             st.write("""
             **Đây là phiên bản App Ver 1.0 do Team ISO 50001 TUV phát triển**
             
@@ -403,4 +438,3 @@ def setup_environment_variables():
 
 if __name__ == "__main__":
     main()
-
