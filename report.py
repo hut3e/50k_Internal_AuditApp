@@ -228,9 +228,37 @@ def format_date(date_value):
 
 def get_download_link_docx(buffer, filename, text):
     """Tạo link tải xuống cho file DOCX"""
-    b64 = base64.b64encode(buffer.getvalue()).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">📥 {text}</a>'
-    return href
+    try:
+        # Đảm bảo buffer không None
+        if buffer is None:
+            raise ValueError("Buffer is None")
+        
+        # Sử dụng getvalue() để lấy toàn bộ nội dung mà không thay đổi vị trí của buffer
+        content = buffer.getvalue()
+        
+        # Nếu getvalue() trả về None hoặc rỗng, thử đọc bằng read()
+        if not content:
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+        
+        # Kiểm tra nội dung có hợp lệ không
+        if not content or len(content) < 100:  # File DOCX tối thiểu khoảng vài trăm bytes
+            raise ValueError(f"Buffer content is too small or empty (length: {len(content) if content else 0})")
+        
+        # Kiểm tra signature của file DOCX (PK là zip signature)
+        if content[:2] != b'PK':
+            raise ValueError("Buffer does not contain valid DOCX file (missing ZIP signature)")
+        
+        b64 = base64.b64encode(content).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">📥 {text}</a>'
+        return href
+    except Exception as e:
+        print(f"Lỗi khi tạo download link DOCX: {e}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Lỗi khi tạo link tải xuống: {str(e)}")
+        return f'<p style="color:red;">Lỗi: Không thể tạo file tải xuống - {str(e)}</p>'
 
 def get_download_link_pdf(buffer, filename, text):
     """Tạo link tải xuống cho file PDF"""
@@ -297,19 +325,43 @@ def dataframe_to_docx(df, title, filename):
         footer = doc.add_paragraph("Hệ thống Khảo sát & Đánh giá")
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Lưu tệp
+        # Lưu tệp vào buffer
         buffer = io.BytesIO()
         doc.save(buffer)
+        
+        # Đảm bảo tất cả dữ liệu được ghi vào buffer
+        buffer.flush()
+        
+        # Đưa về đầu để đọc
         buffer.seek(0)
         
-        return buffer
-    except Exception as e:
-        print(f"Lỗi khi tạo DOCX: {str(e)}")
-        st.error(f"Không thể tạo file DOCX: {str(e)}")
-        # Trả về buffer trống nếu lỗi
-        buffer = io.BytesIO()
+        # Đọc lại để đảm bảo buffer có dữ liệu
+        content = buffer.getvalue()
+        if not content or len(content) < 100:
+            # Nếu getvalue() không có, thử read()
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+        
+        # Kiểm tra buffer có dữ liệu hợp lệ không
+        if not content or len(content) < 100:
+            raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
+        
+        # Kiểm tra signature DOCX (PK = ZIP format)
+        if content[:2] != b'PK':
+            raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
+        
+        # Đảm bảo buffer ở đầu để sẵn sàng đọc
         buffer.seek(0)
         return buffer
+            
+    except Exception as e:
+        print(f"Lỗi khi tạo DOCX: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Không thể tạo file DOCX: {str(e)}")
+        # Trả về buffer trống nếu lỗi
+        return None
 
 class UNIOCDF_FPDF(FPDF):
     """Lớp PDF tùy chỉnh hỗ trợ Unicode đầy đủ"""
@@ -1014,19 +1066,43 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         time_footer = doc.add_paragraph(f"Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         time_footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Lưu tệp
+        # Lưu tệp vào buffer
         buffer = io.BytesIO()
         doc.save(buffer)
+        
+        # Đảm bảo tất cả dữ liệu được ghi vào buffer
+        buffer.flush()
+        
+        # Đưa về đầu để đọc
         buffer.seek(0)
         
-        return buffer
-    except Exception as e:
-        print(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
-        traceback.print_exc()
-        # Trả về buffer trống nếu lỗi
-        buffer = io.BytesIO()
+        # Đọc lại để đảm bảo buffer có dữ liệu
+        content = buffer.getvalue()
+        if not content or len(content) < 100:
+            # Nếu getvalue() không có, thử read()
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+        
+        # Kiểm tra buffer có dữ liệu hợp lệ không
+        if not content or len(content) < 100:
+            raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
+        
+        # Kiểm tra signature DOCX (PK = ZIP format)
+        if content[:2] != b'PK':
+            raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
+        
+        # Đảm bảo buffer ở đầu để sẵn sàng đọc
         buffer.seek(0)
         return buffer
+            
+    except Exception as e:
+        print(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Không thể tạo báo cáo DOCX: {str(e)}")
+        # Trả về None để dễ kiểm tra lỗi
+        return None
 
 
 
@@ -1581,7 +1657,7 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
         
         st.dataframe(
             df_display.sort_values(by="Thời gian nộp", ascending=False),
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
         
@@ -1710,14 +1786,19 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                                 max_possible
                             )
                             
-                            st.markdown(
-                                get_download_link_docx(docx_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
-                                                    "Tải xuống báo cáo chi tiết (DOCX)"), 
-                                unsafe_allow_html=True
-                            )
+                            if docx_buffer is None:
+                                st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                            else:
+                                st.markdown(
+                                    get_download_link_docx(docx_buffer, 
+                                                        f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.docx", 
+                                                        "Tải xuống báo cáo chi tiết (DOCX)"), 
+                                    unsafe_allow_html=True
+                                )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo DOCX: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
                     
                     with col2:
                         # Tạo báo cáo dạng PDF
@@ -1898,7 +1979,7 @@ def display_question_tab(submissions=None, questions=None):
             st.pyplot(fig)
     
     # Hiển thị bảng thống kê
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    st.dataframe(filtered_df, width='stretch', hide_index=True)
     
     # Chi tiết từng câu hỏi
     if not filtered_df.empty:
@@ -2150,7 +2231,7 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
     # Hiển thị bảng
     st.dataframe(
         df_students,
-        use_container_width=True,
+        width='stretch',
         hide_index=True
     )
     
@@ -2177,7 +2258,7 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
         
         st.dataframe(
             class_stats,
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
         
@@ -2222,8 +2303,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.docx")
-                    st.markdown(get_download_link_docx(docx_buffer, "bao_cao_tat_ca_bai_nop.docx", 
-                                                "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is None:
+                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_tat_ca_bai_nop.docx", 
+                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2246,8 +2330,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.docx")
-                    st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_cau_hoi.docx", 
-                                                "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is None:
+                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_cau_hoi.docx", 
+                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2269,8 +2356,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.docx")
-                    st.markdown(get_download_link_docx(docx_buffer, "bao_cao_danh_sach_hoc_vien.docx", 
-                                                "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is None:
+                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_danh_sach_hoc_vien.docx", 
+                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2292,8 +2382,11 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 try:
                     # DOCX
                     docx_buffer = dataframe_to_docx(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.docx")
-                    st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_lop.docx", 
-                                                "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
+                    if docx_buffer is None:
+                        st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                    else:
+                        st.markdown(get_download_link_docx(docx_buffer, "bao_cao_thong_ke_lop.docx", 
+                                                    "Tải xuống báo cáo (DOCX)"), unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Lỗi khi tạo DOCX: {str(e)}")
             
@@ -2467,7 +2560,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     
                     # Hiển thị dữ liệu dạng bảng
                     st.write("### Chi tiết các lần làm bài")
-                    st.dataframe(df_student_report, hide_index=True, use_container_width=True)
+                    st.dataframe(df_student_report, hide_index=True, width='stretch')
                     
                     # Tạo báo cáo Word cho học viên này
                     try:
@@ -2480,13 +2573,19 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         
                         with col1:
                             # Word
-                            docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
-                            st.markdown(
-                                get_download_link_docx(docx_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}.docx", 
-                                                    "Tải xuống báo cáo DOCX"), 
-                                unsafe_allow_html=True
-                            )
+                            try:
+                                docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
+                                if docx_buffer is None:
+                                    st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
+                                else:
+                                    st.markdown(
+                                        get_download_link_docx(docx_buffer, 
+                                                            f"bao_cao_{student_name.replace(' ', '_')}.docx", 
+                                                            "Tải xuống báo cáo DOCX"), 
+                                        unsafe_allow_html=True
+                                    )
+                            except Exception as e:
+                                st.error(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
                         
                         with col2:
                             # PDF
@@ -2656,7 +2755,7 @@ def view_statistics():
                         }
                         for s in students
                     ])
-                    st.dataframe(df_students, use_container_width=True)
+                    st.dataframe(df_students, width='stretch')
                 else:
                     st.info("Chưa có users nào trong hệ thống.")
             with tab5:
