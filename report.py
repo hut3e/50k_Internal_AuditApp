@@ -525,11 +525,21 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         
         # Lưu PDF vào buffer
         try:
-            pdf_bytes = pdf.output(dest='S').encode('latin-1')
-        except Exception:
-            # Một số hệ thống dùng already-bytes
-            pdf_bytes = pdf.output(dest='S')
-        buffer.write(pdf_bytes)
+            pdf.output(dest=buffer)
+        except TypeError:
+            # Fallback cho fpdf2: output có thể trả về bytes
+            try:
+                pdf_bytes = pdf.output(dest='S')
+                if isinstance(pdf_bytes, str):
+                    pdf_bytes = pdf_bytes.encode('latin-1')
+                buffer.write(pdf_bytes)
+            except Exception:
+                # Cuối cùng: thử encode latin-1
+                try:
+                    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                    buffer.write(pdf_bytes)
+                except Exception:
+                    buffer.write(pdf.output(dest='S'))
         
     except Exception as e:
         print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
@@ -1055,10 +1065,15 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         
         # Lưu PDF vào buffer
         try:
-            pdf_bytes = pdf.output(dest='S').encode('latin-1')
-        except Exception:
-            pdf_bytes = pdf.output(dest='S')
-        buffer.write(pdf_bytes)
+            pdf.output(dest=buffer)
+        except TypeError:
+            try:
+                pdf_bytes = pdf.output(dest='S')
+                if isinstance(pdf_bytes, str):
+                    pdf_bytes = pdf_bytes.encode('latin-1')
+                buffer.write(pdf_bytes)
+            except Exception:
+                buffer.write(pdf.output(dest='S'))
     except Exception as e:
         print(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
         traceback.print_exc()
@@ -1073,15 +1088,31 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             error_text = f'Không thể hiển thị báo cáo chi tiết. Vui lòng sử dụng định dạng DOCX hoặc Excel.\nLỗi: {str(e)}'
             simple_pdf.multi_cell(0, 10, error_text, 0, 'L')
             try:
-                pdf_bytes = simple_pdf.output(dest='S').encode('latin-1')
-            except Exception:
-                pdf_bytes = simple_pdf.output(dest='S')
-            buffer.write(pdf_bytes)
+                simple_pdf.output(dest=buffer)
+            except TypeError:
+                try:
+                    pdf_bytes = simple_pdf.output(dest='S')
+                    if isinstance(pdf_bytes, str):
+                        pdf_bytes = pdf_bytes.encode('latin-1')
+                    buffer.write(pdf_bytes)
+                except Exception:
+                    buffer.write(simple_pdf.output(dest='S'))
         except Exception as e2:
             print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
     
     buffer.seek(0)
     return buffer
+
+def display_overview_tab(submissions=None, students=None, questions=None, max_possible=0):
+    """Hiển thị tab tổng quan"""
+    if submissions is None:
+        submissions = []
+    if students is None:
+        students = []
+    if questions is None:
+        questions = []
+        
+    st.subheader("Tổng quan kết quả")
     
     # Thống kê cơ bản
     total_submissions = len(submissions)
@@ -1093,7 +1124,7 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         avg_score = 0
         max_score = 0
         
-    total_users = len(set([s.get("user_email") for s in submissions]))
+    total_users = len(set([s.get("user_email") for s in submissions])) if submissions else 0
     
     # Hiển thị metrics
     col1, col2, col3 = st.columns(3)
