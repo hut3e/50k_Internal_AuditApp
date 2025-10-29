@@ -920,7 +920,7 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.lib.units import mm
         
-    buffer = io.BytesIO()
+        buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, 
                                 rightMargin=10*mm, leftMargin=10*mm,
                                 topMargin=15*mm, bottomMargin=15*mm)
@@ -1236,7 +1236,7 @@ def dataframe_to_pdf_fpdf(df, title, filename):
                 
                 # Tính số dòng cần thiết cho nội dung này
                 try:
-                content_width = pdf.get_string_width(content)
+                    content_width = pdf.get_string_width(content)
                 except:
                     # Fallback: ước tính thô
                     content_width = len(content) * pdf.get_string_width('W') / 10
@@ -1353,18 +1353,281 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             except Exception:
                 simple_pdf.output(dest=buffer)
                 buffer.flush()
-    
-    buffer.seek(0)
+            
+            buffer.seek(0)
             
             # Kiểm tra lại
             content = buffer.getvalue()
             if content and len(content) > 100 and content.startswith(b'%PDF'):
-    return buffer
+                return buffer
             else:
                 return None
         except Exception as e2:
             print(f"Không thể tạo báo cáo thay thế: {str(e2)}")
             return None
+
+def create_student_report_pdf_reportlab(student_name, student_email, student_class, submission, questions, max_possible):
+    """Tạo báo cáo chi tiết học viên dạng PDF sử dụng ReportLab (tránh font issues)"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.units import mm
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4,
+                                rightMargin=10*mm, leftMargin=10*mm,
+                                topMargin=15*mm, bottomMargin=15*mm)
+        
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor=colors.HexColor('#000000'),
+            alignment=1,  # Center
+            spaceAfter=12
+        )
+        
+        # Story để chứa nội dung
+        story = []
+        
+        # Title
+        title = f"Báo cáo chi tiết - {student_name}"
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 6*mm))
+        
+        # Timestamp
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        story.append(Paragraph(f"Thời gian xuất báo cáo: {timestamp}", styles['Normal']))
+        story.append(Spacer(1, 4*mm))
+        
+        # Thông tin học viên
+        story.append(Paragraph("<b>Thông tin học viên</b>", styles['Heading2']))
+        info_data = [
+            ["Thông tin", "Giá trị"],
+            ["Họ và tên", student_name],
+            ["Email", student_email],
+            ["Lớp", student_class],
+        ]
+        
+        # Xử lý timestamp
+        submission_time = "Không xác định"
+        if isinstance(submission.get("timestamp"), (int, float)):
+            try:
+                submission_time = datetime.fromtimestamp(submission.get("timestamp")).strftime("%H:%M:%S %d/%m/%Y")
+            except:
+                pass
+        else:
+            try:
+                dt = datetime.fromisoformat(submission.get("timestamp", "").replace("Z", "+00:00"))
+                submission_time = dt.strftime("%H:%M:%S %d/%m/%Y")
+            except:
+                pass
+        
+        info_data.append(["Thời gian nộp", submission_time])
+        
+        info_table = Table(info_data, colWidths=[50*mm, 140*mm])
+        info_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
+        ]))
+        story.append(info_table)
+        story.append(Spacer(1, 8*mm))
+        
+        # Chi tiết câu trả lời
+        story.append(Paragraph("<b>Chi tiết câu trả lời</b>", styles['Heading2']))
+        
+        # Đảm bảo responses đúng định dạng
+        responses = submission.get("responses", {})
+        if isinstance(responses, str):
+            try:
+                responses = json.loads(responses)
+            except:
+                responses = {}
+        if not isinstance(responses, dict):
+            responses = {}
+        
+        # Validate questions
+        normalized_questions = []
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            if isinstance(q.get("answers"), str):
+                try:
+                    q["answers"] = json.loads(q["answers"])
+                except:
+                    q["answers"] = [q["answers"]] if q.get("answers") else []
+            if isinstance(q.get("correct"), str):
+                try:
+                    q["correct"] = json.loads(q["correct"])
+                except:
+                    try:
+                        q["correct"] = [int(x.strip()) for x in q["correct"].split(",")]
+                    except:
+                        q["correct"] = []
+            if not isinstance(q.get("answers"), list):
+                q["answers"] = []
+            if not isinstance(q.get("correct"), list):
+                q["correct"] = []
+            normalized_questions.append(q)
+        questions = normalized_questions
+        
+        # Tính toán điểm
+        total_correct = 0
+        calculated_total_score = 0
+        multiple_choice_score = 0
+        essay_score = 0
+        
+        # Tạo bảng chi tiết
+        detail_data = [["Câu hỏi", "Đáp án học viên", "Đáp án đúng", "Kết quả", "Điểm"]]
+        
+        for q in questions:
+            q_id = str(q.get("id", ""))
+            user_ans = responses.get(q_id, [])
+            if not isinstance(user_ans, list):
+                user_ans = [user_ans] if user_ans is not None else []
+            
+            try:
+                from database_helper import check_answer_correctness as db_check_answer
+                is_correct = db_check_answer(user_ans, q)
+            except ImportError:
+                is_correct = check_answer_correctness(user_ans, q)
+            
+            q_type = q.get("type", "")
+            if is_correct:
+                total_correct += 1
+                points = q.get("score", 0)
+            else:
+                points = 0
+            
+            if q_type in ["Checkbox", "Combobox"]:
+                if is_correct:
+                    multiple_choice_score += points
+            elif q_type == "Essay":
+                if is_correct:
+                    essay_score += points
+            
+            calculated_total_score += points
+            
+            # Chuẩn bị dữ liệu cho bảng
+            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"[:80]  # Giới hạn độ dài
+            
+            if q_type == "Essay":
+                user_answer_text = user_ans[0] if user_ans else "Không trả lời"
+                correct_answer_text = "Câu hỏi tự luận"
+                result = "Đã trả lời" if is_correct else "Không trả lời"
+            else:
+                user_answer_text = ", ".join([str(a) for a in user_ans])[:50] if user_ans else "Không trả lời"
+                q_correct = q.get("correct", [])
+                q_answers = q.get("answers", [])
+                try:
+                    expected = [q_answers[i - 1] for i in q_correct] if q_correct else []
+                    correct_answer_text = ", ".join([str(a) for a in expected])[:50] if expected else "Không có đáp án"
+                except:
+                    correct_answer_text = "Lỗi đáp án"
+                result = "Đúng" if is_correct else "Sai"
+            
+            detail_data.append([question_text, user_answer_text[:50], correct_answer_text[:50], result, str(points)])
+        
+        # Tạo bảng với độ rộng cột hợp lý cho A4
+        col_widths = [60*mm, 45*mm, 45*mm, 20*mm, 20*mm]
+        detail_table = Table(detail_data, colWidths=col_widths, repeatRows=1)
+        detail_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+            ('ALIGN', (3, 1), (4, -1), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
+        ]))
+        story.append(detail_table)
+        story.append(Spacer(1, 8*mm))
+        
+        # Tổng kết
+        max_multiple_choice = sum([q.get("score", 0) for q in questions if q.get("type") in ["Checkbox", "Combobox"]])
+        max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
+        
+        story.append(Paragraph("<b>Tổng kết</b>", styles['Heading2']))
+        summary_data = [
+            ["Chỉ tiêu", "Giá trị"],
+            ["Số câu đúng", f"{total_correct}/{len(questions)}"],
+            ["Điểm trắc nghiệm", f"{multiple_choice_score}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0"],
+            ["Điểm tự luận", f"{essay_score}/{max_essay}" if max_essay > 0 else "0/0"],
+            ["Tổng điểm", f"{calculated_total_score}/{max_possible}"],
+            ["Tỷ lệ đúng", f"{(total_correct/len(questions)*100):.1f}%" if len(questions) > 0 else "0%"],
+            ["Tỷ lệ điểm", f"{(calculated_total_score/max_possible*100):.1f}%" if max_possible > 0 else "0%"],
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[80*mm, 110*mm])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
+        ]))
+        story.append(summary_table)
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Validate buffer
+        buffer.seek(0)
+        content = buffer.getvalue()
+        if not content or len(content) < 100:
+            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+        if not content.startswith(b'%PDF'):
+            raise ValueError("PDF buffer does not contain valid PDF file (missing %PDF signature)")
+        
+        buffer.seek(0)
+        return buffer
+        
+    except Exception as e:
+        print(f"Lỗi khi tạo PDF bằng ReportLab: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback to FPDF nếu ReportLab fail
+        return create_student_report_pdf_fpdf(student_name, student_email, student_class, submission, questions, max_possible)
+
 def create_student_report_docx(student_name, student_email, student_class, submission, questions, max_possible):
     """Tạo báo cáo chi tiết bài làm của học viên dạng DOCX"""
     try:
@@ -1702,35 +1965,43 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         time_footer = doc.add_paragraph(f"Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         time_footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Lưu tệp vào buffer
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        
-        # Đảm bảo tất cả dữ liệu được ghi vào buffer
-        buffer.flush()
-        
-        # Đưa về đầu để đọc
-        buffer.seek(0)
-        
-        # Đọc lại để đảm bảo buffer có dữ liệu
-        content = buffer.getvalue()
-        if not content or len(content) < 100:
-            # Nếu getvalue() không có, thử read()
+        # Lưu tệp vào buffer - đảm bảo cách xử lý đúng
+        temp_buffer = io.BytesIO()
+        try:
+            # Lưu document vào buffer tạm
+            doc.save(temp_buffer)
+            temp_buffer.flush()
+            temp_buffer.seek(0)
+            
+            # Tạo buffer chính và copy dữ liệu
+            buffer = io.BytesIO()
+            buffer.write(temp_buffer.getvalue())
+            temp_buffer.close()
+            
+            # Đảm bảo buffer ở đầu
             buffer.seek(0)
-            content = buffer.read()
+            
+            # Kiểm tra nội dung
+            content = buffer.getvalue()
+            if not content or len(content) < 100:
+                raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
+            
+            # Kiểm tra signature DOCX (PK = ZIP format)
+            if content[:2] != b'PK':
+                raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
+            
+            # Đảm bảo buffer ở đầu để sẵn sàng đọc
             buffer.seek(0)
-        
-        # Kiểm tra buffer có dữ liệu hợp lệ không
-        if not content or len(content) < 100:
-            raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
-        
-        # Kiểm tra signature DOCX (PK = ZIP format)
-        if content[:2] != b'PK':
-            raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
-        
-        # Đảm bảo buffer ở đầu để sẵn sàng đọc
-        buffer.seek(0)
-        return buffer
+            return buffer
+        except Exception as save_error:
+            print(f"Lỗi khi lưu DOCX vào buffer: {save_error}")
+            import traceback
+            traceback.print_exc()
+            try:
+                temp_buffer.close()
+            except:
+                pass
+            raise
             
     except Exception as e:
         print(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
@@ -2207,13 +2478,13 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             except Exception:
                 simple_pdf.output(dest=buffer)
                 buffer.flush()
-    
-    buffer.seek(0)
+            
+            buffer.seek(0)
             
             # Kiểm tra lại
             content = buffer.getvalue()
             if content and len(content) > 100 and content.startswith(b'%PDF'):
-    return buffer
+                return buffer
             else:
                 return None
         except Exception as e2:
@@ -2613,21 +2884,32 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                     with col2:
                         # Tạo báo cáo dạng PDF
                         try:
-                            pdf_buffer = create_student_report_pdf_fpdf(
-                                student_name,
-                                submission.get("user_email", ""),
-                                student_class,
-                                submission,
-                                questions,
-                                max_possible
-                            )
+                            try:
+                                pdf_buffer = create_student_report_pdf_reportlab(
+                                    student_name,
+                                    submission.get("user_email", ""),
+                                    student_class,
+                                    submission,
+                                    questions,
+                                    max_possible
+                                )
+                            except Exception as pdf_error:
+                                # Fallback to FPDF nếu ReportLab fail
+                                pdf_buffer = create_student_report_pdf_fpdf(
+                                    student_name,
+                                    submission.get("user_email", ""),
+                                    student_class,
+                                    submission,
+                                    questions,
+                                    max_possible
+                                )
                             
                             if pdf_buffer is not None:
                                 get_download_link_pdf(
                                     pdf_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
+                                    f"bao_cao_{student_name.replace(' ', '_')}_{submission.get('id', '')}.pdf", 
                                     "📥 Tải xuống báo cáo chi tiết (PDF)"
-                            )
+                                )
                         except Exception as e:
                             st.error(f"Không thể tạo báo cáo PDF: {str(e)}")
     else:
@@ -3558,14 +3840,25 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                             with col2:
                                 try:
                                     # PDF
-                                    pdf_buffer = create_student_report_pdf_fpdf(
-                                        student_name,
-                                        selected_email,
-                                        student_class,
-                                        submission,
-                                        questions,
-                                        max_possible
-                                    )
+                                    try:
+                                        pdf_buffer = create_student_report_pdf_reportlab(
+                                            student_name,
+                                            selected_email,
+                                            student_class,
+                                            submission,
+                                            questions,
+                                            max_possible
+                                        )
+                                    except Exception as pdf_error:
+                                        # Fallback to FPDF nếu ReportLab fail
+                                        pdf_buffer = create_student_report_pdf_fpdf(
+                                            student_name,
+                                            selected_email,
+                                            student_class,
+                                            submission,
+                                            questions,
+                                            max_possible
+                                        )
                                     
                                     if pdf_buffer is not None:
                                         get_download_link_pdf(
