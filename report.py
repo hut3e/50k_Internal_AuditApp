@@ -28,22 +28,63 @@ try:
 except ImportError:
     # Mock functions để tránh lỗi khi không có module
     def check_answer_correctness(user_ans, q):
-        q_correct = q.get("correct", [])
-        if isinstance(q_correct, str):
-            try:
-                q_correct = json.loads(q_correct)
-            except:
-                try:
-                    q_correct = [int(x.strip()) for x in q_correct.split(",")]
-                except:
-                    q_correct = []
+        """Mock function - nên sử dụng hàm từ database_helper"""
+        if not user_ans:
+            return False
         
-        # Chuyển user_ans và q_correct thành tập hợp để so sánh
-        if isinstance(user_ans, list) and isinstance(q_correct, list):
-            # Chuyển đổi các đáp án thành chuỗi để có thể so sánh
-            user_ans_set = set(str(x) for x in user_ans)
-            correct_set = set(str(x) for x in q_correct)
-            return user_ans_set == correct_set
+        q_type = q.get("type", "")
+        
+        # Câu hỏi tự luận (Essay): tính đúng nếu có nội dung
+        if q_type == "Essay":
+            return bool(user_ans) and isinstance(user_ans[0], str) and user_ans[0].strip() != ""
+        
+        # Câu hỏi Combobox: chọn một đáp án
+        if q_type == "Combobox":
+            if len(user_ans) == 1:
+                answer_text = user_ans[0]
+                answers = q.get("answers", [])
+                correct = q.get("correct", [])
+                if isinstance(answers, str):
+                    try:
+                        answers = json.loads(answers)
+                    except:
+                        answers = [answers]
+                if isinstance(correct, str):
+                    try:
+                        correct = json.loads(correct)
+                    except:
+                        try:
+                            correct = [int(x.strip()) for x in correct.split(",")]
+                        except:
+                            correct = []
+                answer_index = answers.index(answer_text) + 1 if answer_text in answers else -1
+                return answer_index in correct
+            return False
+        
+        # Câu hỏi Checkbox: nhiều lựa chọn
+        if q_type == "Checkbox":
+            answers = q.get("answers", [])
+            if isinstance(answers, str):
+                try:
+                    answers = json.loads(answers)
+                except:
+                    answers = [answers]
+            correct = q.get("correct", [])
+            if isinstance(correct, str):
+                try:
+                    correct = json.loads(correct)
+                except:
+                    try:
+                        correct = [int(x.strip()) for x in correct.split(",")]
+                    except:
+                        correct = []
+            correct_set = set(correct)
+            selected_indices = []
+            for ans in user_ans:
+                if ans in answers:
+                    selected_indices.append(answers.index(ans) + 1)
+            return set(selected_indices) == correct_set
+        
         return False
     
     def get_all_questions():
@@ -605,8 +646,7 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
 
 def dataframe_to_pdf_fpdf(df, title, filename):
     """Tạo file PDF từ DataFrame sử dụng FPDF2 với hỗ trợ Unicode"""
-    buffer = io.BytesIO()
-    
+    # Buffer sẽ được tạo khi lưu PDF, không tạo ở đây
     try:
         # Xác định hướng trang dựa vào số lượng cột
         orientation = 'L' if len(df.columns) > 5 else 'P'
@@ -832,48 +872,53 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             # Di chuyển đến dòng tiếp theo
             pdf.set_y(row_start_y + max_height)
         
-        # Lưu PDF vào buffer
+        # Lưu PDF vào buffer - luôn sử dụng dest='S' để lấy bytes
+        buffer = io.BytesIO()  # Đảm bảo buffer sạch
         try:
-            # Thử dùng dest=buffer trước (fpdf2)
-            pdf.output(dest=buffer)
-            buffer.flush()
-        except (TypeError, AttributeError):
-            # Fallback cho fpdf2: output có thể trả về bytes
-            try:
-                pdf_bytes = pdf.output(dest='S')
-                if isinstance(pdf_bytes, str):
-                    pdf_bytes = pdf_bytes.encode('latin-1')
-                elif not isinstance(pdf_bytes, bytes):
-                    pdf_bytes = bytes(pdf_bytes)
+            # Sử dụng dest='S' để lấy bytes trực tiếp (cách an toàn nhất)
+            pdf_bytes = pdf.output(dest='S')
+            
+            # Xử lý các kiểu dữ liệu khác nhau
+            if isinstance(pdf_bytes, bytes):
                 buffer.write(pdf_bytes)
+            elif isinstance(pdf_bytes, str):
+                # Nếu là string, encode sang bytes
+                buffer.write(pdf_bytes.encode('latin-1', errors='ignore'))
+            elif hasattr(pdf_bytes, '__iter__'):
+                # Nếu là iterable, chuyển thành bytes
+                buffer.write(bytes(pdf_bytes))
+            else:
+                # Fallback: thử encode sang string rồi bytes
+                buffer.write(str(pdf_bytes).encode('latin-1', errors='ignore'))
+            
+            buffer.flush()
+            
+        except Exception as output_error:
+            print(f"Lỗi khi output PDF: {output_error}")
+            # Thử lại với dest=buffer
+            try:
+                buffer = io.BytesIO()
+                pdf.output(dest=buffer)
                 buffer.flush()
-            except Exception as fallback_error:
-                # Cuối cùng: thử các cách khác
-                try:
-                    pdf_bytes = pdf.output(dest='S')
-                    if isinstance(pdf_bytes, str):
-                        pdf_bytes = pdf_bytes.encode('latin-1')
-                    buffer.write(pdf_bytes)
-                    buffer.flush()
-                except Exception:
-                    # Last resort: tạo buffer mới
-                    buffer = io.BytesIO()
-                    pdf_bytes = pdf.output(dest='S')
-                    if isinstance(pdf_bytes, str):
-                        pdf_bytes = pdf_bytes.encode('latin-1')
-                    buffer.write(pdf_bytes)
-                    buffer.flush()
+            except Exception:
+                raise ValueError(f"Không thể tạo PDF output: {str(output_error)}")
         
-        # Đảm bảo buffer ở đầu và có dữ liệu hợp lệ
+        # Đảm bảo buffer ở đầu và kiểm tra dữ liệu
         buffer.seek(0)
         content = buffer.getvalue()
         
         # Kiểm tra signature PDF
         if not content or len(content) < 100:
-            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+            # Thử đọc lại bằng read()
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+            
+            if not content or len(content) < 100:
+                raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0}). Có thể PDF chưa được tạo đúng cách.")
         
         if not content.startswith(b'%PDF'):
-            raise ValueError("PDF buffer does not contain valid PDF (missing %PDF signature)")
+            raise ValueError(f"PDF buffer does not contain valid PDF (missing %PDF signature). Buffer đầu: {content[:50] if content else 'None'}")
         
         buffer.seek(0)
         return buffer
@@ -991,6 +1036,7 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         # Tính toán thông tin về bài làm
         total_correct = 0
         total_questions = len(questions)
+        calculated_total_score = 0  # Tổng điểm tính lại từ đầu
         
         doc.add_heading("Chi tiết câu trả lời", level=2)
         
@@ -1022,23 +1068,85 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             shading_elm = parse_xml(r'<w:shd {} w:fill="E9E9E9"/>'.format(nsdecls('w')))
             cell._tc.get_or_add_tcPr().append(shading_elm)
         
-        # Đảm bảo responses đúng định dạng
+        # Đảm bảo responses đúng định dạng - parse từ JSON string nếu cần
         responses = submission.get("responses", {})
         if isinstance(responses, str):
             try:
                 responses = json.loads(responses)
-            except:
+            except json.JSONDecodeError as e:
+                print(f"Lỗi khi parse responses JSON: {e}")
                 responses = {}
+        
+        # Đảm bảo responses là dict
+        if not isinstance(responses, dict):
+            print(f"Warning: responses không phải dict, type: {type(responses)}")
+            responses = {}
+        
+        # Validate và normalize questions trước khi xử lý
+        normalized_questions = []
+        for q in questions:
+            # Đảm bảo q là dict và có các trường cần thiết
+            if not isinstance(q, dict):
+                continue
+            
+            # Parse answers nếu là string
+            if isinstance(q.get("answers"), str):
+                try:
+                    q["answers"] = json.loads(q["answers"])
+                except:
+                    try:
+                        # Fallback: nếu không phải JSON, giữ nguyên
+                        q["answers"] = [q["answers"]]
+                    except:
+                        q["answers"] = []
+            
+            # Parse correct nếu là string
+            if isinstance(q.get("correct"), str):
+                try:
+                    q["correct"] = json.loads(q["correct"])
+                except:
+                    try:
+                        # Thử parse dạng "1,2,3"
+                        q["correct"] = [int(x.strip()) for x in q["correct"].split(",")]
+                    except:
+                        q["correct"] = []
+            
+            # Đảm bảo answers và correct là list
+            if not isinstance(q.get("answers"), list):
+                q["answers"] = []
+            if not isinstance(q.get("correct"), list):
+                q["correct"] = []
+            
+            normalized_questions.append(q)
+        
+        # Sử dụng questions đã được normalize
+        questions = normalized_questions
         
         # Thêm dữ liệu câu trả lời với định dạng cải thiện
         for q in questions:
             q_id = str(q.get("id", ""))
             
-            # Đáp án người dùng
+            # Đáp án người dùng - lấy từ responses (đã parse từ JSON)
             user_ans = responses.get(q_id, [])
             
-            # Kiểm tra đúng/sai
-            is_correct = check_answer_correctness(user_ans, q)
+            # Đảm bảo user_ans là list
+            if not isinstance(user_ans, list):
+                if user_ans is not None:
+                    user_ans = [user_ans]
+                else:
+                    user_ans = []
+            
+            # Kiểm tra đúng/sai sử dụng hàm từ database_helper (không dùng mock)
+            # Đảm bảo import đúng hàm từ database_helper
+            try:
+                from database_helper import check_answer_correctness as db_check_answer
+                is_correct = db_check_answer(user_ans, q)
+            except ImportError:
+                # Fallback nếu không import được - nhưng nên có cảnh báo
+                print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
+                is_correct = check_answer_correctness(user_ans, q)
+            
+            # Tính điểm cho câu hỏi này
             if is_correct:
                 total_correct += 1
                 result = "Đúng"
@@ -1046,6 +1154,9 @@ def create_student_report_docx(student_name, student_email, student_class, submi
             else:
                 result = "Sai"
                 points = 0
+            
+            # Cộng vào tổng điểm
+            calculated_total_score += points
             
             # Thêm hàng mới vào bảng
             row_cells = answers_table.add_row().cells
@@ -1138,7 +1249,8 @@ def create_student_report_docx(student_name, student_email, student_class, submi
         
         cells = summary_table.rows[1].cells
         cells[0].text = "Điểm số"
-        cells[1].text = f"{submission.get('score', 0)}/{max_possible}"
+        # Sử dụng điểm đã tính lại để đảm bảo chính xác
+        cells[1].text = f"{calculated_total_score}/{max_possible}"
         
         cells = summary_table.rows[2].cells
         cells[0].text = "Tỷ lệ đúng"
@@ -1205,8 +1317,7 @@ def display_overview_tab(submissions=None, students=None, questions=None, max_po
 
 def create_student_report_pdf_fpdf(student_name, student_email, student_class, submission, questions, max_possible):
     """Tạo báo cáo chi tiết bài làm của học viên dạng PDF sử dụng FPDF2 với hỗ trợ Unicode"""
-    buffer = io.BytesIO()
-    
+    # Buffer sẽ được tạo khi lưu PDF, không tạo ở đây
     try:
         # Tạo PDF mới với hỗ trợ Unicode
         title = f"Báo cáo chi tiết - {student_name}"
@@ -1246,14 +1357,59 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         # Tính toán thông tin về bài làm
         total_correct = 0
         total_questions = len(questions)
+        calculated_total_score = 0  # Tổng điểm tính lại từ đầu
         
-        # Đảm bảo responses đúng định dạng
+        # Đảm bảo responses đúng định dạng - parse từ JSON string nếu cần
         responses = submission.get("responses", {})
         if isinstance(responses, str):
             try:
                 responses = json.loads(responses)
-            except:
+            except json.JSONDecodeError as e:
+                print(f"Lỗi khi parse responses JSON trong PDF: {e}")
                 responses = {}
+        
+        # Đảm bảo responses là dict
+        if not isinstance(responses, dict):
+            print(f"Warning: responses không phải dict trong PDF, type: {type(responses)}")
+            responses = {}
+        
+        # Validate và normalize questions trước khi xử lý
+        normalized_questions = []
+        for q in questions:
+            # Đảm bảo q là dict và có các trường cần thiết
+            if not isinstance(q, dict):
+                continue
+            
+            # Parse answers nếu là string
+            if isinstance(q.get("answers"), str):
+                try:
+                    q["answers"] = json.loads(q["answers"])
+                except:
+                    try:
+                        q["answers"] = [q["answers"]]
+                    except:
+                        q["answers"] = []
+            
+            # Parse correct nếu là string
+            if isinstance(q.get("correct"), str):
+                try:
+                    q["correct"] = json.loads(q["correct"])
+                except:
+                    try:
+                        q["correct"] = [int(x.strip()) for x in q["correct"].split(",")]
+                    except:
+                        q["correct"] = []
+            
+            # Đảm bảo answers và correct là list
+            if not isinstance(q.get("answers"), list):
+                q["answers"] = []
+            if not isinstance(q.get("correct"), list):
+                q["correct"] = []
+            
+            normalized_questions.append(q)
+        
+        # Sử dụng questions đã được normalize
+        questions = normalized_questions
         
         # Xử lý timestamp
         submission_time = "Không xác định"
@@ -1344,16 +1500,34 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         for q in questions:
             q_id = str(q.get("id", ""))
             
-            # Đáp án người dùng
+            # Đáp án người dùng - lấy từ responses (đã parse từ JSON)
             user_ans = responses.get(q_id, [])
             
-            # Kiểm tra đúng/sai
-            is_correct = check_answer_correctness(user_ans, q)
+            # Đảm bảo user_ans là list
+            if not isinstance(user_ans, list):
+                if user_ans is not None:
+                    user_ans = [user_ans]
+                else:
+                    user_ans = []
+            
+            # Kiểm tra đúng/sai sử dụng hàm từ database_helper (không dùng mock)
+            try:
+                from database_helper import check_answer_correctness as db_check_answer
+                is_correct = db_check_answer(user_ans, q)
+            except ImportError:
+                # Fallback nếu không import được - nhưng nên có cảnh báo
+                print("Warning: Không thể import check_answer_correctness từ database_helper, sử dụng mock function")
+                is_correct = check_answer_correctness(user_ans, q)
+            
+            # Tính điểm cho câu hỏi này
             if is_correct:
                 total_correct += 1
                 points = q.get("score", 0)
             else:
                 points = 0
+            
+            # Cộng vào tổng điểm
+            calculated_total_score += points
             
             # Chuẩn bị nội dung dựa trên loại câu hỏi
             question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
@@ -1457,54 +1631,60 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         pdf.cell(summary_col2, 10, f"{total_correct}/{total_questions}", 1, 1, 'L')
         
         pdf.cell(summary_col1, 10, 'Diem so', 1, 0, 'L', 1)
-        pdf.cell(summary_col2, 10, f"{submission.get('score', 0)}/{max_possible}", 1, 1, 'L')
+        # Sử dụng điểm đã tính lại để đảm bảo chính xác
+        pdf.cell(summary_col2, 10, f"{calculated_total_score}/{max_possible}", 1, 1, 'L')
         
         pdf.cell(summary_col1, 10, 'Ty le dung', 1, 0, 'L', 1)
         percent = total_correct/total_questions*100 if total_questions > 0 else 0
         pdf.cell(summary_col2, 10, f"{percent:.1f}% {'(Dat)' if percent >= 50 else '(Chua dat)'}", 1, 1, 'L')
         
-        # Lưu PDF vào buffer
+        # Lưu PDF vào buffer - luôn sử dụng dest='S' để lấy bytes
+        buffer = io.BytesIO()  # Đảm bảo buffer sạch
         try:
-            # Thử dùng dest=buffer trước (fpdf2)
-            pdf.output(dest=buffer)
-            buffer.flush()
-        except (TypeError, AttributeError):
-            # Fallback cho fpdf2: output có thể trả về bytes
-            try:
-                pdf_bytes = pdf.output(dest='S')
-                if isinstance(pdf_bytes, str):
-                    pdf_bytes = pdf_bytes.encode('latin-1')
-                elif not isinstance(pdf_bytes, bytes):
-                    pdf_bytes = bytes(pdf_bytes)
+            # Sử dụng dest='S' để lấy bytes trực tiếp (cách an toàn nhất)
+            pdf_bytes = pdf.output(dest='S')
+            
+            # Xử lý các kiểu dữ liệu khác nhau
+            if isinstance(pdf_bytes, bytes):
                 buffer.write(pdf_bytes)
+            elif isinstance(pdf_bytes, str):
+                # Nếu là string, encode sang bytes
+                buffer.write(pdf_bytes.encode('latin-1', errors='ignore'))
+            elif hasattr(pdf_bytes, '__iter__'):
+                # Nếu là iterable, chuyển thành bytes
+                buffer.write(bytes(pdf_bytes))
+            else:
+                # Fallback: thử encode sang string rồi bytes
+                buffer.write(str(pdf_bytes).encode('latin-1', errors='ignore'))
+            
+            buffer.flush()
+            
+        except Exception as output_error:
+            print(f"Lỗi khi output PDF học viên: {output_error}")
+            # Thử lại với dest=buffer
+            try:
+                buffer = io.BytesIO()
+                pdf.output(dest=buffer)
                 buffer.flush()
-            except Exception as fallback_error:
-                # Cuối cùng: thử các cách khác
-                try:
-                    pdf_bytes = pdf.output(dest='S')
-                    if isinstance(pdf_bytes, str):
-                        pdf_bytes = pdf_bytes.encode('latin-1')
-                    buffer.write(pdf_bytes)
-                    buffer.flush()
-                except Exception:
-                    # Last resort: tạo buffer mới
-                    buffer = io.BytesIO()
-                    pdf_bytes = pdf.output(dest='S')
-                    if isinstance(pdf_bytes, str):
-                        pdf_bytes = pdf_bytes.encode('latin-1')
-                    buffer.write(pdf_bytes)
-                    buffer.flush()
+            except Exception:
+                raise ValueError(f"Không thể tạo PDF output: {str(output_error)}")
         
-        # Đảm bảo buffer ở đầu và có dữ liệu hợp lệ
+        # Đảm bảo buffer ở đầu và kiểm tra dữ liệu
         buffer.seek(0)
         content = buffer.getvalue()
         
         # Kiểm tra signature PDF
         if not content or len(content) < 100:
-            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+            # Thử đọc lại bằng read()
+            buffer.seek(0)
+            content = buffer.read()
+            buffer.seek(0)
+            
+            if not content or len(content) < 100:
+                raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0}). Có thể PDF chưa được tạo đúng cách.")
         
         if not content.startswith(b'%PDF'):
-            raise ValueError("PDF buffer does not contain valid PDF (missing %PDF signature)")
+            raise ValueError(f"PDF buffer does not contain valid PDF (missing %PDF signature). Buffer đầu: {content[:50] if content else 'None'}")
         
         buffer.seek(0)
         return buffer
@@ -1822,10 +2002,17 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                         q_id = str(q.get("id", ""))
                         st.write(f"**Câu {q.get('id', '')}: {q.get('question', '')}**")
                         
-                        # Đáp án người dùng
+                        # Đáp án người dùng - lấy từ responses (đã parse từ JSON)
                         user_ans = responses.get(q_id, [])
                         
-                        # Chuẩn bị dữ liệu đáp án đúng
+                        # Đảm bảo user_ans là list
+                        if not isinstance(user_ans, list):
+                            if user_ans is not None:
+                                user_ans = [user_ans]
+                            else:
+                                user_ans = []
+                        
+                        # Chuẩn bị dữ liệu đáp án đúng - parse JSON nếu cần
                         q_correct = q.get("correct", [])
                         q_answers = q.get("answers", [])
                         
@@ -1849,8 +2036,12 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                         except (IndexError, TypeError):
                             expected = ["Lỗi đáp án"]
                         
-                        # Kiểm tra đúng/sai
-                        is_correct = check_answer_correctness(user_ans, q)
+                        # Kiểm tra đúng/sai - sử dụng hàm từ database_helper (không dùng mock)
+                        try:
+                            from database_helper import check_answer_correctness as db_check_answer
+                            is_correct = db_check_answer(user_ans, q)
+                        except ImportError:
+                            is_correct = check_answer_correctness(user_ans, q)
                         if is_correct:
                             total_correct += 1
                         
@@ -1978,12 +2169,27 @@ def display_question_tab(submissions=None, questions=None):
             
             user_ans = responses.get(q_id, [])
             
+            # Đảm bảo user_ans là list
+            if not isinstance(user_ans, list):
+                if user_ans is not None:
+                    user_ans = [user_ans]
+                else:
+                    user_ans = []
+            
             if not user_ans:
                 skip_count += 1
-            elif check_answer_correctness(user_ans, q):
-                correct_count += 1
             else:
-                wrong_count += 1
+                # Sử dụng hàm từ database_helper (không dùng mock)
+                try:
+                    from database_helper import check_answer_correctness as db_check_answer
+                    is_correct = db_check_answer(user_ans, q)
+                except ImportError:
+                    is_correct = check_answer_correctness(user_ans, q)
+                
+                if is_correct:
+                    correct_count += 1
+                else:
+                    wrong_count += 1
         
         question_stats[q_id] = {
             "question": q.get("question", ""),
@@ -2629,20 +2835,39 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                             except:
                                 pass
                         
-                        # Đảm bảo responses đúng định dạng
+                        # Đảm bảo responses đúng định dạng - parse từ JSON string từ database
                         responses = submission.get("responses", {})
                         if isinstance(responses, str):
                             try:
                                 responses = json.loads(responses)
-                            except:
+                            except json.JSONDecodeError as e:
+                                print(f"Lỗi khi parse responses JSON trong display_export_tab: {e}")
                                 responses = {}
                         
-                        # Tính số câu trả lời đúng
+                        # Đảm bảo responses là dict
+                        if not isinstance(responses, dict):
+                            responses = {}
+                        
+                        # Tính số câu trả lời đúng - sử dụng dữ liệu thực từ database
                         correct_count = 0
                         for q in questions:
                             q_id = str(q.get("id", ""))
                             user_ans = responses.get(q_id, [])
-                            is_correct = check_answer_correctness(user_ans, q)
+                            
+                            # Đảm bảo user_ans là list
+                            if not isinstance(user_ans, list):
+                                if user_ans is not None:
+                                    user_ans = [user_ans]
+                                else:
+                                    user_ans = []
+                            
+                            # Sử dụng hàm từ database_helper (không dùng mock)
+                            try:
+                                from database_helper import check_answer_correctness as db_check_answer
+                                is_correct = db_check_answer(user_ans, q)
+                            except ImportError:
+                                is_correct = check_answer_correctness(user_ans, q)
+                            
                             if is_correct:
                                 correct_count += 1
                         
@@ -2787,16 +3012,64 @@ def view_statistics():
     df_all_submissions = pd.DataFrame()
     
     try:
-        # Lấy dữ liệu từ database
-        questions = get_all_questions()
+        # Lấy dữ liệu THỰC từ database - KHÔNG dùng mock/fake data
+        # Đảm bảo import từ database_helper (nơi có hàm thực)
+        try:
+            from database_helper import get_all_questions as db_get_all_questions
+            questions = db_get_all_questions()
+            print(f"✓ Đã load {len(questions)} câu hỏi từ database (database_helper)")
+        except ImportError:
+            print("⚠️ Warning: Không thể import get_all_questions từ database_helper, dùng fallback")
+            questions = get_all_questions()  # Fallback to mock (chỉ khi không có database_helper)
+        
+        # Validate và normalize questions - đảm bảo parse JSON đúng cách
+        validated_questions = []
+        for q in questions:
+            if not isinstance(q, dict):
+                print(f"Warning: Bỏ qua câu hỏi không hợp lệ (không phải dict)")
+                continue
+            
+            # Parse answers từ JSON string nếu cần (từ database)
+            if isinstance(q.get("answers"), str):
+                try:
+                    q["answers"] = json.loads(q["answers"])
+                except:
+                    try:
+                        q["answers"] = [q["answers"]]
+                    except:
+                        q["answers"] = []
+            
+            # Parse correct từ JSON string nếu cần (từ database)
+            if isinstance(q.get("correct"), str):
+                try:
+                    q["correct"] = json.loads(q["correct"])
+                except:
+                    try:
+                        q["correct"] = [int(x.strip()) for x in q["correct"].split(",")]
+                    except:
+                        q["correct"] = []
+            
+            # Đảm bảo là list
+            if not isinstance(q.get("answers"), list):
+                q["answers"] = []
+            if not isinstance(q.get("correct"), list):
+                q["correct"] = []
+            
+            validated_questions.append(q)
+        questions = validated_questions
+        
+        if not questions:
+            st.warning("⚠️ Không có câu hỏi nào được load từ database. Kiểm tra kết nối Supabase.")
         
         # Lấy TẤT CẢ users từ database (bao gồm "Học viên", "student", "admin")
         try:
             from database_helper import get_all_students
             students = get_all_students()
+            print(f"✓ Đã load {len(students)} users từ database (get_all_students)")
         except ImportError:
             # Fallback nếu hàm chưa có
             students = get_all_users(role=["Học viên", "student", "admin"])
+            print(f"✓ Đã load {len(students)} users từ database (get_all_users - fallback)")
         if not students:
             # Thử load từng role riêng
             students_hv = get_all_users(role="Học viên") if 'get_all_users' in globals() else []
@@ -2827,17 +3100,62 @@ def view_statistics():
                 st.warning(f"Không tìm thấy bài nộp của học viên: {search_email}")
                 return
         else:
-            # Lấy tất cả bài nộp trực tiếp từ database (hiệu quả hơn)
+            # Lấy tất cả bài nộp trực tiếp từ database (hiệu quả hơn) - KHÔNG dùng mock
             try:
-                submissions = get_all_submissions()
+                # Đảm bảo import từ database_helper
+                try:
+                    from database_helper import get_all_submissions as db_get_all_submissions
+                    submissions = db_get_all_submissions()
+                    print(f"✓ Đã load {len(submissions)} bài nộp từ database (database_helper)")
+                except ImportError:
+                    print("⚠️ Warning: Không thể import get_all_submissions từ database_helper")
+                    submissions = get_all_submissions()  # Fallback
+                
+                # Validate và parse responses từ JSON cho mỗi submission
+                validated_submissions = []
+                for s in submissions:
+                    if not isinstance(s, dict):
+                        continue
+                    
+                    # Parse responses từ JSON string nếu cần (từ database)
+                    if isinstance(s.get("responses"), str):
+                        try:
+                            s["responses"] = json.loads(s["responses"])
+                        except json.JSONDecodeError as e:
+                            print(f"Warning: Lỗi parse responses cho submission {s.get('id', 'N/A')}: {e}")
+                            s["responses"] = {}
+                    
+                    # Đảm bảo responses là dict
+                    if not isinstance(s.get("responses"), dict):
+                        s["responses"] = {}
+                    
+                    validated_submissions.append(s)
+                
+                submissions = validated_submissions
+                
             except Exception as e:
                 st.error(f"Lỗi khi lấy dữ liệu bài nộp từ Supabase: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 # Fallback: thử lấy từng học viên nếu lỗi
                 st.info("Đang thử cách khác...")
+                submissions = []
                 for student in students:
                     try:
-                        student_submissions = get_user_submissions(student.get("email", ""))
+                        try:
+                            from database_helper import get_user_submissions as db_get_user_submissions
+                            student_submissions = db_get_user_submissions(student.get("email", ""))
+                        except ImportError:
+                            student_submissions = get_user_submissions(student.get("email", ""))
+                        
                         if student_submissions:
+                            # Validate responses cho mỗi submission
+                            for sub in student_submissions:
+                                if isinstance(sub.get("responses"), str):
+                                    try:
+                                        sub["responses"] = json.loads(sub["responses"])
+                                    except:
+                                        sub["responses"] = {}
                             submissions.extend(student_submissions)
                     except Exception as ex:
                         print(f"Lỗi khi lấy dữ liệu của học viên {student.get('email', '')}: {str(ex)}")
@@ -2917,23 +3235,36 @@ def view_statistics():
                     "Tỷ lệ đúng": f"{(s.get('score', 0)/max_possible*100):.1f}%" if max_possible > 0 else "N/A"
                 }
                 
-                # Chuyển đổi responses từ JSON string thành dict nếu cần
+                # Chuyển đổi responses từ JSON string thành dict từ database
                 responses = s.get("responses", {})
                 if isinstance(responses, str):
                     try:
                         responses = json.loads(responses)
-                    except:
+                    except json.JSONDecodeError as e:
+                        print(f"Lỗi parse responses cho submission {s.get('id', 'N/A')}: {e}")
                         responses = {}
                 
-                # Thêm câu trả lời của từng câu hỏi
+                # Đảm bảo responses là dict
+                if not isinstance(responses, dict):
+                    responses = {}
+                
+                # Thêm câu trả lời của từng câu hỏi - sử dụng dữ liệu thực từ database
                 for q in questions:
                     q_id = str(q.get("id", ""))
                     user_ans = responses.get(q_id, [])
                     
-                    # Đảm bảo q["correct"] và q["answers"] có định dạng đúng
+                    # Đảm bảo user_ans là list
+                    if not isinstance(user_ans, list):
+                        if user_ans is not None:
+                            user_ans = [user_ans]
+                        else:
+                            user_ans = []
+                    
+                    # Đảm bảo q["correct"] và q["answers"] có định dạng đúng (đã được normalize ở trên)
                     q_correct = q.get("correct", [])
                     q_answers = q.get("answers", [])
                     
+                    # Parse nếu chưa được normalize (backup)
                     if isinstance(q_correct, str):
                         try:
                             q_correct = json.loads(q_correct)
@@ -2953,8 +3284,13 @@ def view_statistics():
                         expected = [q_answers[i - 1] for i in q_correct]
                     except (IndexError, TypeError):
                         expected = ["Lỗi đáp án"]
-                        
-                    is_correct = check_answer_correctness(user_ans, q)
+                    
+                    # Sử dụng hàm từ database_helper (không dùng mock)
+                    try:
+                        from database_helper import check_answer_correctness as db_check_answer
+                        is_correct = db_check_answer(user_ans, q)
+                    except ImportError:
+                        is_correct = check_answer_correctness(user_ans, q)
                     
                     # Thêm thông tin câu hỏi
                     submission_data[f"Câu {q_id}: {q.get('question', '')}"] = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
