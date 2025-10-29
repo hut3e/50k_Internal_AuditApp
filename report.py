@@ -349,13 +349,48 @@ def get_download_link_pdf(buffer, filename, text):
     # Sử dụng hàm mới với st.download_button
     return create_download_button(buffer, "pdf", filename, text)
 
+def sanitize_sheet_name(name):
+    """Làm sạch tên sheet để phù hợp với Excel (loại bỏ ký tự không hợp lệ và giới hạn độ dài)"""
+    if not name:
+        return "Sheet"
+    
+    # Loại bỏ các ký tự không hợp lệ trong Excel sheet name
+    invalid_chars = [':', '\\', '/', '?', '*', '[', ']']
+    cleaned = name
+    for char in invalid_chars:
+        cleaned = cleaned.replace(char, '-')
+    
+    # Giới hạn độ dài tối đa 31 ký tự (giới hạn của Excel)
+    if len(cleaned) > 31:
+        cleaned = cleaned[:31]
+    
+    # Loại bỏ khoảng trắng đầu/cuối
+    cleaned = cleaned.strip()
+    
+    # Nếu sau khi làm sạch bị rỗng, dùng tên mặc định
+    if not cleaned:
+        cleaned = "Sheet"
+    
+    return cleaned
+
 def export_to_excel(dataframes, sheet_names, filename):
     """Tạo file Excel với nhiều sheet từ các DataFrame"""
     try:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            used_names = set()
             for df, sheet_name in zip(dataframes, sheet_names):
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                # Làm sạch sheet name để tránh lỗi ký tự không hợp lệ
+                base_name = sanitize_sheet_name(sheet_name)
+                clean_sheet_name = base_name
+                # Đảm bảo duy nhất trong workbook
+                suffix = 1
+                while clean_sheet_name in used_names:
+                    candidate = f"{base_name[:28]}-{suffix}" if len(base_name) > 28 else f"{base_name}-{suffix}"
+                    clean_sheet_name = sanitize_sheet_name(candidate)
+                    suffix += 1
+                used_names.add(clean_sheet_name)
+                df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
         
         # Đảm bảo dữ liệu được ghi
         output.flush()
@@ -591,20 +626,35 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
             'C:\\Windows\\Fonts',
         ]
         
-        # Tìm font DejaVu Sans
+        # Tìm font DejaVu Sans (bao gồm cả các biến thể Condensed nếu có)
         font_found = False
         font_paths = {
             'DejaVuSans.ttf': None,
             'DejaVuSans-Bold.ttf': None,
             'DejaVuSans-Oblique.ttf': None
         }
+        alt_variants = [
+            ('DejaVuSans.ttf', ['DejaVuSansCondensed.ttf', 'DejaVuSansCondensed.ttf']),
+            ('DejaVuSans-Bold.ttf', ['DejaVuSansCondensed-Bold.ttf', 'DejaVuSans-Bold.ttf']),
+            ('DejaVuSans-Oblique.ttf', ['DejaVuSansCondensed-Oblique.ttf', 'DejaVuSans-Oblique.ttf'])
+        ]
         
-        # Tìm từng font file
+        # Tìm từng font file (ưu tiên bản tiêu chuẩn, nếu không có thử các biến thể thay thế)
         for font_dir in font_dirs:
-            for font_file in font_paths:
+            for font_file in list(font_paths.keys()):
+                if font_paths[font_file]:
+                    continue
+                # Thử exact match
                 font_path = os.path.join(font_dir, font_file)
-                if os.path.exists(font_path) and font_paths[font_file] is None:
+                if os.path.exists(font_path):
                     font_paths[font_file] = font_path
+                    continue
+                # Thử các biến thể thay thế
+                for alt in [a for key, alts in alt_variants if key == font_file for a in alts]:
+                    alt_path = os.path.join(font_dir, alt)
+                    if os.path.exists(alt_path):
+                        font_paths[font_file] = alt_path
+                        break
         
         # Kiểm tra xem có đủ cả 3 font không; nếu thiếu, thử tải về assets/fonts
         if not all(font_paths.values()):
@@ -623,12 +673,15 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
         # Thiết lập mã hóa UTF-8
         pdf.set_doc_option('core_fonts_encoding', 'utf-8')
         
-        # Thêm các font Unicode nếu tìm thấy
+        # Thêm các font Unicode nếu tìm thấy (cho phép thiếu style: dùng regular cho B/I nếu cần)
         if font_found:
             try:
-                pdf.add_font('DejaVu', '', font_paths['DejaVuSans.ttf'], uni=True)
-                pdf.add_font('DejaVu', 'B', font_paths['DejaVuSans-Bold.ttf'], uni=True)
-                pdf.add_font('DejaVu', 'I', font_paths['DejaVuSans-Oblique.ttf'], uni=True)
+                regular_path = font_paths['DejaVuSans.ttf']
+                bold_path = font_paths.get('DejaVuSans-Bold.ttf') or regular_path
+                italic_path = font_paths.get('DejaVuSans-Oblique.ttf') or regular_path
+                pdf.add_font('DejaVu', '', regular_path, uni=True)
+                pdf.add_font('DejaVu', 'B', bold_path, uni=True)
+                pdf.add_font('DejaVu', 'I', italic_path, uni=True)
                 font_name = 'DejaVu'
             except Exception as font_error:
                 print(f"Lỗi khi thêm font DejaVu: {font_error}")
