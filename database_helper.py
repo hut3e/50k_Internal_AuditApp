@@ -5,6 +5,7 @@ import streamlit as st
 from datetime import datetime
 from supabase import create_client
 import supabase
+import traceback
 
 def check_supabase_config():
     """Kiểm tra cấu hình Supabase"""
@@ -343,6 +344,38 @@ def get_user_submissions(email):
         return []
     except Exception as e:
         st.error(f"Lỗi khi lấy bài làm của học viên: {e}")
+        return []
+
+def get_all_submissions():
+    """Lấy tất cả bài làm từ tất cả học viên"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return []
+        
+        # Lấy tất cả bài nộp
+        result = supabase.table("submissions").select("*").order("timestamp", desc=True).execute()
+        
+        if result.data:
+            submissions = []
+            for s in result.data:
+                # Chuyển đổi responses từ JSON string thành dict
+                if isinstance(s["responses"], str):
+                    try:
+                        s["responses"] = json.loads(s["responses"])
+                    except:
+                        s["responses"] = {}
+                
+                submissions.append(s)
+            
+            return submissions
+        
+        return []
+    except Exception as e:
+        st.error(f"Lỗi khi lấy tất cả bài làm: {e}")
+        print(f"Chi tiết lỗi: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
         return []
 
 def get_submission_statistics():
