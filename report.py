@@ -373,9 +373,12 @@ def sanitize_sheet_name(name):
     
     return cleaned
 
-def export_to_excel(dataframes, sheet_names, filename):
-    """Tạo file Excel với nhiều sheet từ các DataFrame"""
+def export_to_excel(dataframes, sheet_names, filename, include_summary=True, questions=None, submissions=None):
+    """Tạo file Excel với nhiều sheet từ các DataFrame, bao gồm phần tổng hợp điểm và tự động căn chỉnh"""
     try:
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+        
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             used_names = set()
@@ -390,7 +393,160 @@ def export_to_excel(dataframes, sheet_names, filename):
                     clean_sheet_name = sanitize_sheet_name(candidate)
                     suffix += 1
                 used_names.add(clean_sheet_name)
+                
+                # Ghi DataFrame vào Excel
                 df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
+                
+                # Lấy worksheet để format
+                worksheet = writer.sheets[clean_sheet_name]
+                
+                # Format header
+                header_fill = PatternFill(start_color="E9E9E9", end_color="E9E9E9", fill_type="solid")
+                header_font = Font(bold=True, size=11)
+                header_alignment = Alignment(horizontal="center", vertical="center")
+                
+                for cell in worksheet[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = header_alignment
+                
+                # Tự động điều chỉnh độ rộng cột theo nội dung (giới hạn theo A4)
+                # A4 width: ~210mm, với margin ~10mm mỗi bên = ~190mm usable
+                # Approx: 1 character width = 0.1 inch = 2.54mm
+                # Max columns on A4 portrait: ~75 characters total width
+                max_width_chars = 75  # Giới hạn cho A4 portrait
+                total_char_width = 0
+                
+                for idx, column in enumerate(worksheet.columns, 1):
+                    column_letter = get_column_letter(idx)
+                    max_length = 0
+                    column_cells = list(column)
+                    
+                    # Tìm độ dài tối đa trong cột
+                    for cell in column_cells:
+                        try:
+                            if cell.value:
+                                cell_str = str(cell.value)
+                                # Giới hạn chiều dài cho tính toán
+                                if len(cell_str) > 100:
+                                    cell_str = cell_str[:100]
+                                max_length = max(max_length, len(cell_str))
+                        except:
+                            pass
+                    
+                    # Điều chỉnh độ rộng (min 10, max 50 để fit A4)
+                    adjusted_width = min(max(max_length + 2, 10), 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+                    total_char_width += adjusted_width
+                
+                # Nếu tổng độ rộng vượt quá giới hạn, scale lại
+                if total_char_width > max_width_chars:
+                    scale_factor = max_width_chars / total_char_width
+                    for idx in range(1, len(df.columns) + 1):
+                        column_letter = get_column_letter(idx)
+                        current_width = worksheet.column_dimensions[column_letter].width
+                        worksheet.column_dimensions[column_letter].width = max(current_width * scale_factor, 8)
+                
+                # Điều chỉnh chiều cao hàng header
+                worksheet.row_dimensions[1].height = 25
+                
+                # Thêm phần tổng hợp điểm nếu cần và có dữ liệu questions/submissions
+                if include_summary and questions and submissions and "Tất cả bài nộp" in sheet_name:
+                    # Tính tổng hợp điểm trắc nghiệm và tự luận
+                    max_multiple_choice = sum([q.get("score", 0) for q in questions if q.get("type") in ["Checkbox", "Combobox"]])
+                    max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
+                    max_total = sum([q.get("score", 0) for q in questions])
+                    
+                    total_multiple_choice = 0
+                    total_essay = 0
+                    total_score = 0
+                    correct_answers = {}
+                    
+                    # Tính từ các submissions
+                    try:
+                        for s in submissions:
+                            responses = s.get("responses", {})
+                            if isinstance(responses, str):
+                                try:
+                                    responses = json.loads(responses)
+                                except:
+                                    responses = {}
+                            if not isinstance(responses, dict):
+                                responses = {}
+                            
+                            total_score += s.get("score", 0)
+                            
+                            for q in questions:
+                                q_id = str(q.get("id", ""))
+                                q_type = q.get("type", "")
+                                user_ans = responses.get(q_id, [])
+                                if not isinstance(user_ans, list):
+                                    user_ans = [user_ans] if user_ans is not None else []
+                                
+                                try:
+                                    from database_helper import check_answer_correctness as db_check_answer
+                                    is_correct = db_check_answer(user_ans, q)
+                                except ImportError:
+                                    is_correct = check_answer_correctness(user_ans, q)
+                                
+                                if is_correct:
+                                    if q_id not in correct_answers:
+                                        correct_answers[q_id] = 0
+                                    correct_answers[q_id] += 1
+                                    
+                                    points = q.get("score", 0)
+                                    if q_type in ["Checkbox", "Combobox"]:
+                                        total_multiple_choice += points
+                                    elif q_type == "Essay":
+                                        total_essay += points
+                    except Exception as calc_error:
+                        print(f"Lỗi khi tính tổng hợp điểm trong Excel: {calc_error}")
+                    
+                    # Thêm dòng trống
+                    next_row = len(df) + 3
+                    worksheet.cell(row=next_row, column=1).value = "TỔNG KẾT"
+                    worksheet.cell(row=next_row, column=1).font = Font(bold=True, size=12)
+                    
+                    # Thêm bảng tổng hợp
+                    summary_data = [
+                        ["Chỉ tiêu", "Giá trị"],
+                        ["Điểm trắc nghiệm", f"{total_multiple_choice}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0"],
+                        ["Điểm tự luận", f"{total_essay}/{max_essay}" if max_essay > 0 else "0/0"],
+                        ["Tổng điểm", f"{total_score}/{max_total * len(submissions)}" if submissions else f"{total_score}/{max_total}"],
+                        ["Tỷ lệ đúng trắc nghiệm", f"{(total_multiple_choice / (max_multiple_choice * len(submissions)) * 100):.1f}%" if max_multiple_choice > 0 and submissions else "0%"],
+                        ["Tỷ lệ đúng tự luận", f"{(total_essay / (max_essay * len(submissions)) * 100):.1f}%" if max_essay > 0 and submissions else "0%"],
+                    ]
+                    
+                    start_row = next_row + 1
+                    for i, row_data in enumerate(summary_data):
+                        for j, value in enumerate(row_data, 1):
+                            cell = worksheet.cell(row=start_row + i, column=j, value=value)
+                            if i == 0:  # Header row
+                                cell.fill = header_fill
+                                cell.font = header_font
+                                cell.alignment = header_alignment
+                            else:
+                                cell.alignment = Alignment(horizontal="left", vertical="center")
+                                
+                                if j == 1:  # First column (labels)
+                                    cell.font = Font(bold=True)
+                                
+                                # Border
+                                thin_border = Border(
+                                    left=Side(style='thin'),
+                                    right=Side(style='thin'),
+                                    top=Side(style='thin'),
+                                    bottom=Side(style='thin')
+                                )
+                                cell.border = thin_border
+                    
+                    # Điều chỉnh độ rộng cột cho bảng tổng hợp
+                    worksheet.column_dimensions[get_column_letter(1)].width = max(20, worksheet.column_dimensions[get_column_letter(1)].width)
+                    worksheet.column_dimensions[get_column_letter(2)].width = max(20, worksheet.column_dimensions[get_column_letter(2)].width)
+                
+                # Đặt orientation và page size cho A4
+                worksheet.page_setup.orientation = 'portrait'
+                worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
         
         # Đảm bảo dữ liệu được ghi
         output.flush()
@@ -478,24 +634,24 @@ def dataframe_to_docx(df, title, filename):
         # Lưu tệp vào buffer - đảm bảo cách xử lý đúng
         buffer = io.BytesIO()
         try:
-            # Lưu document vào buffer
-            doc.save(buffer)
+            # Đảm bảo document được lưu hoàn toàn
+            # Tạo buffer mới để lưu
+            temp_buffer = io.BytesIO()
+            doc.save(temp_buffer)
             
-            # Đảm bảo tất cả dữ liệu được ghi vào buffer
-            buffer.flush()
+            # Đảm bảo dữ liệu được ghi hoàn toàn
+            temp_buffer.flush()
+            temp_buffer.seek(0)
             
-            # Đưa về đầu để đọc
+            # Copy nội dung sang buffer chính
+            buffer.write(temp_buffer.getvalue())
+            temp_buffer.close()
+            
+            # Đảm bảo buffer ở đầu
             buffer.seek(0)
             
-            # Đọc lại để đảm bảo buffer có dữ liệu
+            # Kiểm tra nội dung
             content = buffer.getvalue()
-            if not content or len(content) < 100:
-                # Nếu getvalue() không có, thử read()
-                buffer.seek(0)
-                content = buffer.read()
-                buffer.seek(0)
-            
-            # Kiểm tra buffer có dữ liệu hợp lệ không
             if not content or len(content) < 100:
                 raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
             
@@ -740,6 +896,120 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
         except Exception as e2:
             print(f"Lỗi khi tạo PDF dự phòng: {str(e2)}")
             return None
+
+def dataframe_to_pdf_reportlab(df, title, filename):
+    """Tạo file PDF từ DataFrame sử dụng ReportLab (tránh font issues)"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.units import mm
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, 
+                                rightMargin=10*mm, leftMargin=10*mm,
+                                topMargin=15*mm, bottomMargin=15*mm)
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            textColor=colors.HexColor('#000000'),
+            alignment=1,  # Center
+            spaceAfter=12
+        )
+        
+        data_style = ParagraphStyle(
+            'DataStyle',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#000000'),
+            leading=10
+        )
+        
+        # Title
+        story = [Paragraph(title, title_style)]
+        story.append(Spacer(1, 6*mm))
+        
+        # Timestamp
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        timestamp_para = Paragraph(f"Thời gian xuất báo cáo: {timestamp}", styles['Normal'])
+        story.append(timestamp_para)
+        story.append(Spacer(1, 4*mm))
+        
+        # Prepare table data
+        table_data = []
+        
+        # Header
+        header = [str(col) for col in df.columns]
+        table_data.append(header)
+        
+        # Data rows (limit để tránh file quá lớn)
+        max_rows = min(500, len(df))
+        for i in range(max_rows):
+            row = [str(df.iloc[i, j])[:100] if len(str(df.iloc[i, j])) > 100 else str(df.iloc[i, j]) 
+                   for j in range(len(df.columns))]
+            table_data.append(row)
+        
+        # Create table
+        col_widths = [50*mm] * len(df.columns)  # Default width
+        # Adjust based on content (simplified)
+        if len(df.columns) > 0:
+            avg_col_width = (A4[0] - 20*mm) / len(df.columns)
+            col_widths = [avg_col_width] * len(df.columns)
+        
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        
+        # Style table
+        table.setStyle(TableStyle([
+            # Header
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            
+            # Body
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
+            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
+        ]))
+        
+        story.append(table)
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Validate buffer
+        buffer.seek(0)
+        content = buffer.getvalue()
+        if not content or len(content) < 100:
+            raise ValueError(f"PDF buffer is empty or too small (length: {len(content) if content else 0})")
+        
+        if not content.startswith(b'%PDF'):
+            raise ValueError("PDF buffer does not contain valid PDF file (missing %PDF signature)")
+        
+        buffer.seek(0)
+        return buffer
+        
+    except Exception as e:
+        print(f"Lỗi khi tạo PDF bằng ReportLab: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback to FPDF nếu ReportLab fail
+        return dataframe_to_pdf_fpdf(df, title, filename)
 
 def dataframe_to_pdf_fpdf(df, title, filename):
     """Tạo file PDF từ DataFrame sử dụng FPDF2 với hỗ trợ Unicode"""
@@ -2847,7 +3117,10 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
             with col2:
                 try:
                     # PDF - sử dụng FPDF thay vì ReportLab
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
+                    try:
+                        pdf_buffer = dataframe_to_pdf_reportlab(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
+                    except:
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_all_submissions, "Báo cáo tất cả bài nộp", "bao_cao_tat_ca_bai_nop.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_tat_ca_bai_nop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -2871,7 +3144,10 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
             with col2:
                 try:
                     # PDF
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
+                    try:
+                        pdf_buffer = dataframe_to_pdf_reportlab(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
+                    except:
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -2894,7 +3170,10 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
             with col2:
                 try:
                     # PDF
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
+                    try:
+                        pdf_buffer = dataframe_to_pdf_reportlab(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
+                    except:
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -2917,7 +3196,10 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
             with col2:
                 try:
                     # PDF
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
+                    try:
+                        pdf_buffer = dataframe_to_pdf_reportlab(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
+                    except:
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -2947,8 +3229,20 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 sheet_names.append("Thống kê lớp")
             
             if dfs and sheet_names:
-                # Gọi export_to_excel - giờ nó tự tạo download button
-                export_to_excel(dfs, sheet_names, "bao_cao_tong_hop.xlsx")
+                # Lấy questions và submissions để tính tổng hợp
+                try:
+                    from database_helper import get_all_questions, get_all_submissions
+                    questions_data = get_all_questions()
+                    submissions_data = get_all_submissions()
+                except:
+                    questions_data = None
+                    submissions_data = None
+                
+                # Gọi export_to_excel - giờ nó tự tạo download button với tổng hợp
+                export_to_excel(dfs, sheet_names, "bao_cao_tong_hop.xlsx", 
+                               include_summary=True, 
+                               questions=questions_data, 
+                               submissions=submissions_data)
             else:
                 st.info("Không có đủ dữ liệu để tạo báo cáo Excel.")
             
@@ -3133,7 +3427,10 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         with col2:
                             # PDF
                             try:
-                                pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
+                                try:
+                                    pdf_buffer = dataframe_to_pdf_reportlab(df_student_report, title, f"bao_cao_{student_name}.pdf")
+                                except:
+                                    pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
                                 if pdf_buffer is not None:
                                     get_download_link_pdf(
                                         pdf_buffer, 
