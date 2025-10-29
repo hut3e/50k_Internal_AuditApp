@@ -16,6 +16,7 @@ from docx.oxml import parse_xml
 
 # Thêm vào đầu file - Thay đổi sang fpdf2 thay vì fpdf
 from fpdf import FPDF
+import urllib.request
 # Thêm thư viện để hỗ trợ Unicode
 import pkg_resources
 
@@ -149,6 +150,35 @@ def setup_vietnamese_fonts():
                     print(f"Lỗi khi đăng ký font {font_name}: {str(e)}")
     
     return registered_fonts
+
+# Đảm bảo có font DejaVu Unicode tại assets/fonts; nếu thiếu sẽ tải về
+def ensure_dejavu_fonts():
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        fonts_dir = os.path.join(base_dir, 'assets', 'fonts')
+        os.makedirs(fonts_dir, exist_ok=True)
+
+        files = {
+            'DejaVuSans.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans.ttf',
+            'DejaVuSans-Bold.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans-Bold.ttf',
+            'DejaVuSans-Oblique.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans-Oblique.ttf',
+        }
+
+        local_paths = {}
+        for fname, url in files.items():
+            local_path = os.path.join(fonts_dir, fname)
+            local_paths[fname] = local_path
+            if not os.path.exists(local_path):
+                try:
+                    urllib.request.urlretrieve(url, local_path)
+                except Exception as e:
+                    print(f"Không thể tải font {fname}: {e}")
+                    # Nếu một file tải thất bại, tiếp tục; sẽ fallback sau
+        # Trả về dict các path đã có (có thể thiếu một vài file)
+        return local_paths
+    except Exception as e:
+        print(f"Lỗi ensure_dejavu_fonts: {e}")
+        return {}
 
 def format_date(date_value):
     """Định dạng ngày tháng từ nhiều kiểu dữ liệu khác nhau"""
@@ -382,7 +412,14 @@ def create_unicode_pdf(orientation='P', format='A4', title='Báo cáo'):
                 if os.path.exists(font_path) and font_paths[font_file] is None:
                     font_paths[font_file] = font_path
         
-        # Kiểm tra xem có đủ cả 3 font không
+        # Kiểm tra xem có đủ cả 3 font không; nếu thiếu, thử tải về assets/fonts
+        if not all(font_paths.values()):
+            downloaded = ensure_dejavu_fonts()
+            for k in list(font_paths.keys()):
+                if not font_paths[k]:
+                    candidate = downloaded.get(k)
+                    if candidate and os.path.exists(candidate):
+                        font_paths[k] = candidate
         if all(font_paths.values()):
             font_found = True
         
@@ -533,8 +570,10 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             max_width = max(header_width, max_content_width)
             
             # Giới hạn độ rộng cột
-            max_col_width = 50  # mm
-            col_width = min(max_col_width, max(10, max_width))
+            max_col_width = 70  # tăng trần để tránh lỗi không đủ chỗ
+            # đảm bảo tối thiểu vừa 1 ký tự 'W' + padding
+            min_char = pdf.get_string_width('W') + 4
+            col_width = min(max_col_width, max(min_char, max_width))
             
             col_widths.append(col_width)
             max_content_widths.append(max_content_width)
@@ -1040,6 +1079,14 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             correct_width *= scale
             result_width *= scale
             points_width *= scale
+
+        # Đảm bảo mỗi cột tối thiểu đủ để render 1 ký tự
+        min_char = pdf.get_string_width('W') + 4
+        q_width = max(q_width, min_char)
+        user_width = max(user_width, min_char)
+        correct_width = max(correct_width, min_char)
+        result_width = max(result_width, min_char)
+        points_width = max(points_width, min_char)
         
         # Vẽ header bảng
         pdf.cell(q_width, 10, 'Cau hoi', 1, 0, 'C', 1)
@@ -1314,17 +1361,24 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
     if questions is None:
         questions = []
     
-    # Đảm bảo load lại students nếu chưa có
+    # Đảm bảo load lại students nếu chưa có - bao gồm tất cả roles
     if not students:
         try:
-            students = get_all_users(role="Học viên")
+            # Thử dùng hàm get_all_students nếu có
+            try:
+                from database_helper import get_all_students
+                students = get_all_students()
+            except ImportError:
+                # Fallback: load tất cả users với các role
+                students = get_all_users(role=["Học viên", "student", "admin"])
             if not students:
-                # Thử load tất cả users
+                # Fallback cuối: load tất cả users và filter
                 all_users = get_all_users(role=None)
                 if all_users:
-                    students = [u for u in all_users if u.get("role") == "Học viên"]
+                    valid_roles = ["Học viên", "student", "admin"]
+                    students = [u for u in all_users if u.get("role") in valid_roles]
         except Exception as e:
-            st.error(f"❌ Lỗi khi load danh sách học viên: {str(e)}")
+            st.error(f"❌ Lỗi khi load danh sách users: {str(e)}")
             students = []
     
     st.subheader("Chi tiết theo học viên")
@@ -1349,8 +1403,12 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
             else:
                 # Nếu không tìm thấy trong students list, thử query trực tiếp từ DB
                 try:
-                    from database_helper import get_all_users
-                    all_students = get_all_users(role="Học viên")
+                    from database_helper import get_all_students, get_all_users
+                    # Thử dùng get_all_students trước
+                    try:
+                        all_students = get_all_students()
+                    except:
+                        all_students = get_all_users(role=["Học viên", "student", "admin"])
                     student_info = next((st for st in all_students if st.get("email") == user_email), None)
                     if student_info:
                         full_name = student_info.get("full_name", "Không xác định")
@@ -1883,27 +1941,40 @@ def display_student_list_tab(submissions=None, students=None, max_possible=0):
     
     st.subheader("Danh sách học viên")
     
-    # Đảm bảo load lại students nếu chưa có
+    # Đảm bảo load lại students nếu chưa có - bao gồm tất cả roles
     if not students:
         try:
-            students = get_all_users(role="Học viên")
+            # Thử dùng hàm get_all_students nếu có
+            try:
+                from database_helper import get_all_students
+                students = get_all_students()
+            except ImportError:
+                # Fallback: load tất cả users với các role
+                students = get_all_users(role=["Học viên", "student", "admin"])
             if not students:
-                # Thử load tất cả users (không filter role)
+                # Fallback cuối: load tất cả users và filter
                 all_users = get_all_users(role=None)
                 if all_users:
-                    students = [u for u in all_users if u.get("role") == "Học viên"]
+                    valid_roles = ["Học viên", "student", "admin"]
+                    students = [u for u in all_users if u.get("role") in valid_roles]
                 
                 if not students:
-                    st.warning("⚠️ Không thể load danh sách học viên từ Supabase. Vui lòng kiểm tra kết nối.")
+                    st.warning("⚠️ Không thể load danh sách users từ Supabase. Vui lòng kiểm tra kết nối.")
                     st.info("💡 Gợi ý: Kiểm tra xem bảng 'users' trong Supabase có dữ liệu không.")
                     return pd.DataFrame(), pd.DataFrame()
         except Exception as e:
-            st.error(f"❌ Lỗi khi load danh sách học viên: {str(e)}")
+            st.error(f"❌ Lỗi khi load danh sách users: {str(e)}")
             import traceback
             st.code(traceback.format_exc(), language="python")
             return pd.DataFrame(), pd.DataFrame()
     
-    st.info(f"📋 Tổng số học viên: {len(students)}")
+    # Phân tích roles
+    role_counts = {}
+    for s in students:
+        role = s.get("role", "Unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
+    role_info = ", ".join([f"{r}: {c}" for r, c in role_counts.items()])
+    st.info(f"📋 Tổng số users: {len(students)} ({role_info})")
     
     # Chuẩn bị dữ liệu - Đảm bảo HIỂN THỊ TẤT CẢ học viên (kể cả chưa làm bài)
     student_data = []
@@ -2197,7 +2268,12 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 st.error("Không thể kết nối đến Supabase.")
                 return
                 
-            students = get_all_users(role="Học viên")
+            # Load tất cả users (Học viên, student, admin)
+            try:
+                from database_helper import get_all_students
+                students = get_all_students()
+            except ImportError:
+                students = get_all_users(role=["Học viên", "student", "admin"])
             questions = get_all_questions()
             max_possible = sum([q.get("score", 0) for q in questions])
             
@@ -2420,14 +2496,30 @@ def view_statistics():
         # Lấy dữ liệu từ database
         questions = get_all_questions()
         
-        # Lấy TẤT CẢ học viên từ database (không chỉ những người đã nộp bài)
-        students = get_all_users(role="Học viên")
+        # Lấy TẤT CẢ users từ database (bao gồm "Học viên", "student", "admin")
+        try:
+            from database_helper import get_all_students
+            students = get_all_students()
+        except ImportError:
+            # Fallback nếu hàm chưa có
+            students = get_all_users(role=["Học viên", "student", "admin"])
+        if not students:
+            # Thử load từng role riêng
+            students_hv = get_all_users(role="Học viên") if 'get_all_users' in globals() else []
+            students_st = get_all_users(role="student") if 'get_all_users' in globals() else []
+            students_ad = get_all_users(role="admin") if 'get_all_users' in globals() else []
+            students = students_hv + students_st + students_ad
         
-        # Debug: hiển thị số lượng học viên được load
+        # Debug: hiển thị số lượng users được load
         if students:
-            st.sidebar.info(f"📊 Đã load {len(students)} học viên từ database")
+            role_counts = {}
+            for s in students:
+                role = s.get("role", "Unknown")
+                role_counts[role] = role_counts.get(role, 0) + 1
+            role_info = ", ".join([f"{r}: {c}" for r, c in role_counts.items()])
+            st.sidebar.info(f"📊 Đã load {len(students)} users từ database ({role_info})")
         else:
-            st.sidebar.warning("⚠️ Không tìm thấy học viên nào trong database")
+            st.sidebar.warning("⚠️ Không tìm thấy users nào trong database")
         
         # Tạo form tìm kiếm email nếu muốn xem báo cáo theo học viên cụ thể
         with st.sidebar:
@@ -2477,13 +2569,14 @@ def view_statistics():
                             "Họ và tên": s.get("full_name", ""),
                             "Email": s.get("email", ""),
                             "Lớp": s.get("class", ""),
+                            "Role": s.get("role", ""),
                             "Số lần làm bài": 0
                         }
                         for s in students
                     ])
                     st.dataframe(df_students, use_container_width=True)
                 else:
-                    st.info("Chưa có học viên nào trong hệ thống.")
+                    st.info("Chưa có users nào trong hệ thống.")
             with tab5:
                 st.info("Chưa có dữ liệu để xuất báo cáo.")
             return
