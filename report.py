@@ -23,7 +23,7 @@ from database_helper import get_supabase_client
 
 # Giả lập database_helper nếu không có
 try:
-    from database_helper import check_answer_correctness, get_all_questions, get_all_users, get_user_submissions
+    from database_helper import check_answer_correctness, get_all_questions, get_all_users, get_user_submissions, get_all_submissions
 except ImportError:
     # Mock functions để tránh lỗi khi không có module
     def check_answer_correctness(user_ans, q):
@@ -52,6 +52,9 @@ except ImportError:
         return []
     
     def get_user_submissions(email):
+        return []
+    
+    def get_all_submissions():
         return []
 
 # Nhập các thư viện cho xuất file
@@ -2216,20 +2219,51 @@ def view_statistics():
                 st.warning(f"Không tìm thấy bài nộp của học viên: {search_email}")
                 return
         else:
-            # Lấy tất cả bài nộp từ tất cả học viên
-            for student in students:
-                try:
-                    student_submissions = get_user_submissions(student.get("email", ""))
-                    submissions.extend(student_submissions)
-                except Exception as e:
-                    st.error(f"Lỗi khi lấy dữ liệu của học viên {student.get('email', '')}: {str(e)}")
+            # Lấy tất cả bài nộp trực tiếp từ database (hiệu quả hơn)
+            try:
+                submissions = get_all_submissions()
+            except Exception as e:
+                st.error(f"Lỗi khi lấy dữ liệu bài nộp từ Supabase: {str(e)}")
+                # Fallback: thử lấy từng học viên nếu lỗi
+                st.info("Đang thử cách khác...")
+                for student in students:
+                    try:
+                        student_submissions = get_user_submissions(student.get("email", ""))
+                        if student_submissions:
+                            submissions.extend(student_submissions)
+                    except Exception as ex:
+                        print(f"Lỗi khi lấy dữ liệu của học viên {student.get('email', '')}: {str(ex)}")
         
         if not questions:
-            st.warning("Chưa có dữ liệu câu hỏi nào trong hệ thống.")
+            st.warning("⚠️ Chưa có dữ liệu câu hỏi nào trong hệ thống. Vui lòng thêm câu hỏi trước.")
             return
         
         if not submissions:
-            st.warning("Chưa có ai nộp khảo sát.")
+            st.info("ℹ️ Chưa có ai nộp khảo sát. Các tab thống kê sẽ hiển thị khi có dữ liệu.")
+            # Vẫn hiển thị tab nhưng với thông báo không có dữ liệu
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tổng quan", "Theo học viên", "Theo câu hỏi", "Danh sách học viên", "Xuất báo cáo"])
+            with tab1:
+                st.info("Chưa có dữ liệu bài nộp để hiển thị.")
+            with tab2:
+                st.info("Chưa có dữ liệu bài nộp để hiển thị.")
+            with tab3:
+                st.info("Chưa có dữ liệu bài nộp để hiển thị.")
+            with tab4:
+                if students:
+                    df_students = pd.DataFrame([
+                        {
+                            "Họ và tên": s.get("full_name", ""),
+                            "Email": s.get("email", ""),
+                            "Lớp": s.get("class", ""),
+                            "Số lần làm bài": 0
+                        }
+                        for s in students
+                    ])
+                    st.dataframe(df_students, use_container_width=True)
+                else:
+                    st.info("Chưa có học viên nào trong hệ thống.")
+            with tab5:
+                st.info("Chưa có dữ liệu để xuất báo cáo.")
             return
         
         # Tạo tab thống kê
