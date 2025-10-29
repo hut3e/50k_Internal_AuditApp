@@ -351,15 +351,47 @@ def get_download_link_pdf(buffer, filename, text):
 
 def export_to_excel(dataframes, sheet_names, filename):
     """Tạo file Excel với nhiều sheet từ các DataFrame"""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for df, sheet_name in zip(dataframes, sheet_names):
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    
-    data = output.getvalue()
-    b64 = base64.b64encode(data).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">📥 {filename}</a>'
-    return href
+    try:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for df, sheet_name in zip(dataframes, sheet_names):
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        # Đảm bảo dữ liệu được ghi
+        output.flush()
+        output.seek(0)
+        
+        # Lấy data
+        data = output.getvalue()
+        if not data or len(data) < 100:
+            # Thử read nếu getvalue không có
+            output.seek(0)
+            data = output.read()
+            output.seek(0)
+        
+        # Kiểm tra signature Excel (XLSX là ZIP format)
+        if not data or len(data) < 100:
+            raise ValueError(f"Excel buffer is empty or too small (length: {len(data) if data else 0})")
+        
+        if data[:2] != b'PK':
+            raise ValueError("Excel buffer does not contain valid XLSX file (missing ZIP signature)")
+        
+        # Sử dụng st.download_button thay vì data URI
+        output.seek(0)
+        st.download_button(
+            label=f"📥 Tải xuống {filename}",
+            data=data,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"excel_{filename}_{id(output)}"
+        )
+        return True
+    except Exception as e:
+        print(f"Lỗi khi tạo Excel: {e}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Không thể tạo file Excel: {str(e)}")
+        return False
 
 def dataframe_to_docx(df, title, filename):
     """Tạo file DOCX từ DataFrame"""
@@ -799,11 +831,19 @@ def dataframe_to_pdf_fpdf(df, title, filename):
             new_x = start_x + sum(col_widths[:i])
             pdf.set_xy(new_x, start_y)
             
-            # Cắt ngắn tên cột nếu quá dài
-            if len(str(col_name)) > 25:
-                col_name = str(col_name)[:22] + "..."
-                
-            pdf.cell(col_widths[i], header_height, str(col_name), 1, 0, 'C', 1)
+            # Cắt ngắn tên cột nếu quá dài và convert sang ASCII-safe nếu cần
+            col_name_str = str(col_name)
+            if len(col_name_str) > 25:
+                col_name_str = col_name_str[:22] + "..."
+            
+            # Convert sang ASCII-safe để tránh font issue
+            try:
+                # Thử hiển thị nguyên gốc trước
+                pdf.cell(col_widths[i], header_height, col_name_str, 1, 0, 'C', 1)
+            except:
+                # Fallback: convert sang ASCII-safe
+                ascii_name = ''.join(c if ord(c) < 128 else '?' for c in col_name_str)
+                pdf.cell(col_widths[i], header_height, ascii_name[:25], 1, 0, 'C', 1)
         
         pdf.ln(header_height)
         
@@ -846,8 +886,19 @@ def dataframe_to_pdf_fpdf(df, title, filename):
                 if len(content) > 200:
                     content = content[:197] + "..."
                 
+                # Convert sang ASCII-safe nếu font không hỗ trợ Unicode tốt
+                font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+                if font_name not in ['DejaVu', 'Arial']:  # Built-in fonts không hỗ trợ Unicode tốt
+                    # Convert sang ASCII-safe
+                    content = ''.join(c if ord(c) < 128 else '?' for c in content)
+                
                 # Tính số dòng cần thiết cho nội dung này
-                content_width = pdf.get_string_width(content)
+                try:
+                    content_width = pdf.get_string_width(content)
+                except:
+                    # Fallback: ước tính thô
+                    content_width = len(content) * pdf.get_string_width('W') / 10
+                
                 available_width = col_widths[j] - 6  # Trừ padding và border
                 
                 # Đảm bảo available_width luôn > 0 (col_widths[j] đã >= 9mm)
@@ -1485,19 +1536,31 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
         col1_width = 50
         col2_width = info_width - col1_width
         
-        # Tạo khung thông tin học viên
+        # Tạo khung thông tin học viên - convert sang ASCII-safe nếu cần
         pdf.set_fill_color(240, 240, 240)
+        font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+        
+        # Helper để convert text sang ASCII-safe nếu font không hỗ trợ Unicode tốt
+        def safe_text(text, max_len=100):
+            text_str = str(text)
+            if len(text_str) > max_len:
+                text_str = text_str[:max_len-3] + "..."
+            if font_name not in ['DejaVu', 'Arial']:
+                # Convert sang ASCII-safe cho built-in fonts
+                text_str = ''.join(c if ord(c) < 128 else '?' for c in text_str)
+            return text_str
+        
         pdf.cell(col1_width, 10, 'Ho va ten', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_name, 1, 1, 'L')
+        pdf.cell(col2_width, 10, safe_text(student_name), 1, 1, 'L')
         
         pdf.cell(col1_width, 10, 'Email', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_email, 1, 1, 'L')
+        pdf.cell(col2_width, 10, safe_text(student_email), 1, 1, 'L')
         
         pdf.cell(col1_width, 10, 'Lop', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, student_class, 1, 1, 'L')
+        pdf.cell(col2_width, 10, safe_text(student_class), 1, 1, 'L')
         
         pdf.cell(col1_width, 10, 'Thoi gian nop', 1, 0, 'L', 1)
-        pdf.cell(col2_width, 10, submission_time, 1, 1, 'L')
+        pdf.cell(col2_width, 10, safe_text(submission_time), 1, 1, 'L')
         
         pdf.ln(5)
         
@@ -1593,17 +1656,28 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
             calculated_total_score += points
             
             # Chuẩn bị nội dung dựa trên loại câu hỏi
-            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
+            # Helper để convert text sang ASCII-safe
+            font_name = getattr(pdf, '_active_font_name', 'DejaVu')
+            def safe_text_pdf(text, max_len=200):
+                text_str = str(text)
+                if len(text_str) > max_len:
+                    text_str = text_str[:max_len-3] + "..."
+                if font_name not in ['DejaVu', 'Arial']:
+                    # Convert sang ASCII-safe cho built-in fonts
+                    text_str = ''.join(c if ord(c) < 128 else '?' for c in text_str)
+                return text_str
+            
+            question_text = safe_text_pdf(f"Câu {q.get('id', '')}: {q.get('question', '')}", 150)
             
             if q.get("type") == "Essay":
                 # Đối với câu hỏi tự luận
                 essay_answer = user_ans[0] if user_ans else "Không trả lời"
-                user_answer_text = essay_answer
-                correct_answer_text = "Câu hỏi tự luận"
-                result = "Đã trả lời" if is_correct else "Không trả lời"
+                user_answer_text = safe_text_pdf(essay_answer)
+                correct_answer_text = "Cau hoi tu luan"
+                result = "Da tra loi" if is_correct else "Khong tra loi"
             else:
                 # Đối với câu hỏi trắc nghiệm
-                user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
+                user_answer_text = safe_text_pdf(", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời")
                 
                 # Chuẩn bị đáp án đúng
                 q_correct = q.get("correct", [])
@@ -1627,10 +1701,10 @@ def create_student_report_pdf_fpdf(student_name, student_email, student_class, s
                 try:
                     expected = [q_answers[i - 1] for i in q_correct]
                 except (IndexError, TypeError):
-                    expected = ["Lỗi đáp án"]
+                    expected = ["Loi dap an"]
                 
-                correct_answer_text = ", ".join([str(a) for a in expected])
-                result = "Đúng" if is_correct else "Sai"
+                correct_answer_text = safe_text_pdf(", ".join([str(a) for a in expected]) if expected else "Khong co dap an")
+                result = "Dung" if is_correct else "Sai"
             
             # Tính chiều cao cần thiết cho từng ô bằng split_only
             line_h = 5
@@ -2820,8 +2894,8 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                 sheet_names.append("Thống kê lớp")
             
             if dfs and sheet_names:
-                # Hiển thị link tải xuống
-                st.markdown(export_to_excel(dfs, sheet_names, "bao_cao_tong_hop.xlsx"), unsafe_allow_html=True)
+                # Gọi export_to_excel - giờ nó tự tạo download button
+                export_to_excel(dfs, sheet_names, "bao_cao_tong_hop.xlsx")
             else:
                 st.info("Không có đủ dữ liệu để tạo báo cáo Excel.")
             
@@ -3018,8 +3092,78 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         
                         # Tạo báo cáo chi tiết cho từng lần làm
                         st.write("### Tải báo cáo chi tiết từng lần làm")
+                        
+                        # Thêm Excel export cho tất cả các lần làm
+                        st.write("#### Tải xuống Excel tổng hợp các lần làm")
+                        try:
+                            # Tạo danh sách DataFrames cho từng lần làm
+                            excel_dfs = []
+                            excel_sheet_names = []
+                            
+                            for idx, submission in enumerate(student_submissions):
+                                # Tạo DataFrame cho lần làm này
+                                submission_data = []
+                                
+                                # Xử lý timestamp
+                                submission_time = "Không xác định"
+                                if isinstance(submission.get("timestamp"), (int, float)):
+                                    try:
+                                        submission_time = datetime.fromtimestamp(submission.get("timestamp")).strftime("%H:%M:%S %d/%m/%Y")
+                                    except:
+                                        pass
+                                else:
+                                    try:
+                                        dt = datetime.fromisoformat(submission.get("timestamp", "").replace("Z", "+00:00"))
+                                        submission_time = dt.strftime("%H:%M:%S %d/%m/%Y")
+                                    except:
+                                        pass
+                                
+                                # Đảm bảo responses đúng định dạng
+                                responses = submission.get("responses", {})
+                                if isinstance(responses, str):
+                                    try:
+                                        responses = json.loads(responses)
+                                    except:
+                                        responses = {}
+                                if not isinstance(responses, dict):
+                                    responses = {}
+                                
+                                # Tính toán chi tiết
+                                for q in questions:
+                                    q_id = str(q.get("id", ""))
+                                    user_ans = responses.get(q_id, [])
+                                    if not isinstance(user_ans, list):
+                                        user_ans = [user_ans] if user_ans is not None else []
+                                    
+                                    try:
+                                        from database_helper import check_answer_correctness as db_check_answer
+                                        is_correct = db_check_answer(user_ans, q)
+                                    except ImportError:
+                                        is_correct = check_answer_correctness(user_ans, q)
+                                    
+                                    row_data = {
+                                        "Câu hỏi ID": q_id,
+                                        "Nội dung câu hỏi": q.get("question", ""),
+                                        "Loại câu hỏi": q.get("type", ""),
+                                        "Đáp án của học viên": ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời",
+                                        "Đáp án đúng": ", ".join([str(q.get("answers", [])[i-1]) if i <= len(q.get("answers", [])) else "" for i in q.get("correct", [])]) if q.get("type") != "Essay" else "Câu hỏi tự luận",
+                                        "Kết quả": "Đúng" if is_correct else "Sai",
+                                        "Điểm": q.get("score", 0) if is_correct else 0
+                                    }
+                                    submission_data.append(row_data)
+                                
+                                df_submission = pd.DataFrame(submission_data)
+                                excel_dfs.append(df_submission)
+                                excel_sheet_names.append(f"Lan {idx+1} - {submission_time}")
+                            
+                            if excel_dfs:
+                                export_to_excel(excel_dfs, excel_sheet_names, f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_tat_ca_lan_lam.xlsx")
+                        except Exception as e:
+                            st.error(f"Lỗi khi tạo báo cáo Excel: {str(e)}")
+                        
                         for idx, submission in enumerate(student_submissions):
-                            col1, col2 = st.columns(2)
+                            st.write(f"#### Lần làm {idx+1}")
+                            col1, col2, col3 = st.columns(3)
                             
                             with col1:
                                 try:
@@ -3062,6 +3206,51 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                         )
                                 except Exception as e:
                                     st.error(f"Lỗi khi tạo báo cáo PDF lần {idx+1}: {str(e)}")
+                            
+                            with col3:
+                                try:
+                                    # Excel cho lần làm này
+                                    submission_data = []
+                                    
+                                    # Xử lý responses
+                                    responses = submission.get("responses", {})
+                                    if isinstance(responses, str):
+                                        try:
+                                            responses = json.loads(responses)
+                                        except:
+                                            responses = {}
+                                    if not isinstance(responses, dict):
+                                        responses = {}
+                                    
+                                    for q in questions:
+                                        q_id = str(q.get("id", ""))
+                                        user_ans = responses.get(q_id, [])
+                                        if not isinstance(user_ans, list):
+                                            user_ans = [user_ans] if user_ans is not None else []
+                                        
+                                        try:
+                                            from database_helper import check_answer_correctness as db_check_answer
+                                            is_correct = db_check_answer(user_ans, q)
+                                        except ImportError:
+                                            is_correct = check_answer_correctness(user_ans, q)
+                                        
+                                        row_data = {
+                                            "Câu hỏi ID": q_id,
+                                            "Nội dung câu hỏi": q.get("question", ""),
+                                            "Loại câu hỏi": q.get("type", ""),
+                                            "Đáp án của học viên": ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời",
+                                            "Đáp án đúng": ", ".join([str(q.get("answers", [])[i-1]) if i <= len(q.get("answers", [])) else "" for i in q.get("correct", [])]) if q.get("type") != "Essay" else "Câu hỏi tự luận",
+                                            "Kết quả": "Đúng" if is_correct else "Sai",
+                                            "Điểm": q.get("score", 0) if is_correct else 0
+                                        }
+                                        submission_data.append(row_data)
+                                    
+                                    df_submission = pd.DataFrame(submission_data)
+                                    excel_dfs_single = [df_submission]
+                                    excel_sheet_names_single = [f"Chi tiet lan {idx+1}"]
+                                    export_to_excel(excel_dfs_single, excel_sheet_names_single, f"bao_cao_chi_tiet_{student_name.replace(' ', '_')}_lan_{idx+1}.xlsx")
+                                except Exception as e:
+                                    st.error(f"Lỗi khi tạo báo cáo Excel lần {idx+1}: {str(e)}")
                         
                     except Exception as e:
                         st.error(f"Lỗi khi tạo báo cáo: {str(e)}")
