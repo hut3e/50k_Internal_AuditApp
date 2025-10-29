@@ -496,7 +496,12 @@ def get_submission_statistics():
         return None
     
 def get_all_users(role=None):
-    """Lấy danh sách tất cả người dùng, có thể lọc theo vai trò"""
+    """Lấy danh sách tất cả người dùng, có thể lọc theo vai trò
+    
+    Args:
+        role: None để lấy tất cả, string cho một role, hoặc list cho nhiều roles
+              Các role hợp lệ: "Học viên", "student", "admin", "admin"
+    """
     try:
         supabase = get_supabase_client()
         if not supabase:
@@ -505,10 +510,41 @@ def get_all_users(role=None):
         
         # Lấy tất cả users từ database
         try:
-            if role:
-                response = supabase.table('users').select('*').eq('role', role).execute()
-            else:
+            if role is None:
+                # Lấy tất cả users
                 response = supabase.table('users').select('*').execute()
+            elif isinstance(role, list):
+                # Lọc theo nhiều roles (OR condition)
+                if len(role) == 1:
+                    response = supabase.table('users').select('*').eq('role', role[0]).execute()
+                else:
+                    # Sử dụng .in_() nếu có nhiều roles, nếu không hỗ trợ thì query từng cái
+                    query = supabase.table('users').select('*')
+                    # Thử dùng .in_() nếu có, nếu không thì query riêng rồi merge
+                    try:
+                        response = query.in_('role', role).execute()
+                    except:
+                        # Fallback: query từng role rồi merge
+                        all_data = []
+                        for r in role:
+                            try:
+                                result = supabase.table('users').select('*').eq('role', r).execute()
+                                if result.data:
+                                    all_data.extend(result.data)
+                            except:
+                                pass
+                        # Loại bỏ duplicate theo email
+                        seen_emails = set()
+                        unique_data = []
+                        for item in all_data:
+                            email = item.get('email')
+                            if email and email not in seen_emails:
+                                seen_emails.add(email)
+                                unique_data.append(item)
+                        response = type('obj', (object,), {'data': unique_data})()
+            else:
+                # Lọc theo một role
+                response = supabase.table('users').select('*').eq('role', role).execute()
         except Exception as query_error:
             print(f"Lỗi query Supabase: {query_error}")
             st.error(f"Lỗi khi truy vấn bảng 'users': {str(query_error)}")
@@ -540,6 +576,10 @@ def get_all_users(role=None):
         traceback.print_exc()
         st.error(f"Lỗi khi lấy danh sách người dùng: {e}")
         return []
+
+def get_all_students():
+    """Lấy tất cả users có role là "Học viên", "student", hoặc "admin" để hiển thị trong báo cáo"""
+    return get_all_users(role=["Học viên", "student", "admin"])
 
 def create_user_if_not_exists(email, password, full_name="", role="Học viên", class_name=""):
     """Tạo người dùng mới nếu chưa tồn tại. Trả về True nếu tạo thành công, False nếu lỗi"""
