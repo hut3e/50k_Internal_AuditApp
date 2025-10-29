@@ -253,64 +253,56 @@ def calculate_score(responses, questions):
     return total_score
 
 def check_answer_correctness(student_answers, question):
-    """Kiểm tra đáp án có đúng không, hỗ trợ chọn nhiều đáp án."""
-    # Nếu câu trả lời trống, không đúng
+    """Kiểm tra đáp án có đúng không.
+    - Checkbox: so khớp tập chỉ số đáp án
+    - Combobox: so khớp một đáp án
+    - Essay: tính là đúng nếu có nội dung (không rỗng)
+    """
     if not student_answers:
         return False
-        
-    # Đối với câu hỏi combobox (chỉ chọn một)
-    if question["type"] == "Combobox":
-        # Nếu có một đáp án và đáp án đó ở vị trí nằm trong danh sách đáp án đúng
+
+    q_type = question.get("type")
+
+    # Tự luận: chỉ cần có nội dung
+    if q_type == "Essay":
+        return bool(student_answers) and isinstance(student_answers[0], str) and student_answers[0].strip() != ""
+
+    # Combobox: chọn một
+    if q_type == "Combobox":
         if len(student_answers) == 1:
             answer_text = student_answers[0]
-            answer_index = question["answers"].index(answer_text) + 1 if answer_text in question["answers"] else -1
-            return answer_index in question["correct"]
+            answers = question.get("answers", [])
+            correct = question.get("correct", [])
+            answer_index = answers.index(answer_text) + 1 if answer_text in answers else -1
+            return answer_index in correct
         return False
-    
-    # Đối với câu hỏi checkbox (nhiều lựa chọn)
-    elif question["type"] == "Checkbox":
-        # Tìm index (vị trí) của các đáp án học viên đã chọn
+
+    # Checkbox: nhiều lựa chọn
+    if q_type == "Checkbox":
+        answers = question.get("answers", [])
+        correct = set(question.get("correct", []))
         selected_indices = []
         for ans in student_answers:
-            if ans in question["answers"]:
-                selected_indices.append(question["answers"].index(ans) + 1)
-        
-        # So sánh với danh sách đáp án đúng
-        return set(selected_indices) == set(question["correct"])
-    
+            if ans in answers:
+                selected_indices.append(answers.index(ans) + 1)
+        return set(selected_indices) == correct
+
     return False
 
 # mới thêm code here
 def get_user(email, password):
     """Kiểm tra đăng nhập và trả về thông tin người dùng"""
     try:
-        # Sửa lỗi: Lấy client Supabase đúng cách
         supabase = get_supabase_client()
         if not supabase:
             st.error("Không thể kết nối đến Supabase.")
             return None
-            
-        # Print debug info to Streamlit log
-        st.write(f"DEBUG: Attempting login for: {email} with password: {password}")
-        print(f"DEBUG: Attempting login for: {email} with password: {password}")
         
-        # First check if any users exist
-        all_users = supabase.table('users').select('*').execute()
-        st.write(f"DEBUG: Total users in database: {len(all_users.data)}")
-        print(f"DEBUG: Total users in database: {len(all_users.data)}")
-        for u in all_users.data:
-            st.write(f"DEBUG: Found user: {u['email']} with role {u['role']}")
-            print(f"DEBUG: Found user: {u['email']} with role {u['role']}")
-        
-        # Now try to log in
+        # Kiểm tra đăng nhập: email và password phải khớp
         response = supabase.table('users').select('*').eq('email', email).eq('password', password).execute()
-        st.write(f"DEBUG: Login query returned {len(response.data)} results")
-        print(f"DEBUG: Login query returned {len(response.data)} results")
         
         if response.data:
             user = response.data[0]
-            st.write(f"DEBUG: User found: {user['email']} with role {user['role']}")
-            print(f"DEBUG: User found: {user['email']} with role {user['role']}")
             return {
                 "email": user["email"],
                 "role": user["role"],
@@ -318,19 +310,9 @@ def get_user(email, password):
                 "full_name": user.get("full_name", ""),
                 "class": user.get("class", "")
             }
-        else:
-            # Just check if user exists
-            user_check = supabase.table('users').select('*').eq('email', email).execute()
-            if user_check.data:
-                st.write(f"DEBUG: User exists but password is wrong. Should be: {user_check.data[0]['password']}")
-                print(f"DEBUG: User exists but password is wrong. Should be: {user_check.data[0]['password']}")
-            else:
-                st.write(f"DEBUG: No user found with email: {email}")
-                print(f"DEBUG: No user found with email: {email}")
-            return None
+        return None
     except Exception as e:
-        st.write(f"DEBUG ERROR: {type(e).__name__}: {str(e)}")
-        print(f"DEBUG ERROR: {type(e).__name__}: {str(e)}")
+        print(f"Lỗi khi đăng nhập: {type(e).__name__}: {str(e)}")
         return None
     
 def get_user_submissions(email):
@@ -508,3 +490,37 @@ def get_all_users(role=None):
         print(f"Error getting users: {e}")
         st.error(f"Lỗi khi lấy danh sách người dùng: {e}")
         return []
+
+def create_user_if_not_exists(email, password, full_name="", role="Học viên", class_name=""):
+    """Tạo người dùng mới nếu chưa tồn tại. Trả về True nếu tạo thành công, False nếu lỗi"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            st.error("Không thể kết nối đến Supabase.")
+            return False
+        
+        # Kiểm tra xem user đã tồn tại chưa
+        existing_user = supabase.table('users').select('email').eq('email', email).execute()
+        
+        if existing_user.data:
+            # Người dùng đã tồn tại
+            return False  # Trả về False để báo đã tồn tại
+        
+        # Tạo người dùng mới
+        user_data = {
+            "email": email,
+            "password": password,
+            "full_name": full_name,
+            "role": role,
+            "class": class_name,
+            "registration_date": datetime.now().isoformat()
+        }
+        
+        result = supabase.table('users').insert(user_data).execute()
+        
+        if result.data:
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Lỗi khi tạo người dùng: {e}")
+        return False
