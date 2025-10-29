@@ -159,20 +159,35 @@ def ensure_dejavu_fonts():
         os.makedirs(fonts_dir, exist_ok=True)
 
         files = {
-            'DejaVuSans.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans.ttf',
-            'DejaVuSans-Bold.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans-Bold.ttf',
-            'DejaVuSans-Oblique.ttf': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans-Oblique.ttf',
+            'DejaVuSans.ttf': [
+                'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
+                'https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans.ttf',
+            ],
+            'DejaVuSans-Bold.ttf': [
+                'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf',
+                'https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans-Bold.ttf',
+            ],
+            'DejaVuSans-Oblique.ttf': [
+                'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Oblique.ttf',
+                'https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans-Oblique.ttf',
+            ],
         }
 
         local_paths = {}
-        for fname, url in files.items():
+        for fname, urls in files.items():
             local_path = os.path.join(fonts_dir, fname)
             local_paths[fname] = local_path
             if not os.path.exists(local_path):
-                try:
-                    urllib.request.urlretrieve(url, local_path)
-                except Exception as e:
-                    print(f"Không thể tải font {fname}: {e}")
+                downloaded = False
+                for url in urls:
+                    try:
+                        urllib.request.urlretrieve(url, local_path)
+                        downloaded = True
+                        break
+                    except Exception as e:
+                        continue
+                if not downloaded:
+                    print(f"Không thể tải font {fname} từ bất kỳ nguồn nào")
                     # Nếu một file tải thất bại, tiếp tục; sẽ fallback sau
         # Trả về dict các path đã có (có thể thiếu một vài file)
         return local_paths
@@ -580,9 +595,48 @@ def dataframe_to_pdf_fpdf(df, title, filename):
         
         # Điều chỉnh để tổng độ rộng không vượt quá chiều rộng khả dụng
         total_width = sum(col_widths)
-        if total_width > usable_width:
+        
+        # Đảm bảo độ rộng tối thiểu cho mỗi cột (đủ để hiển thị 1 ký tự + padding)
+        min_width_per_col = pdf.get_string_width('W') + 6  # padding cho border
+        min_total_width = min_width_per_col * len(df.columns)
+        
+        # Nếu tổng độ rộng tối thiểu vượt quá usable_width, cần điều chỉnh
+        if min_total_width > usable_width:
+            # Trường hợp quá nhiều cột: scale min_width xuống
+            min_width_per_col = (usable_width / len(df.columns)) - 2  # trừ margin
+            if min_width_per_col < 5:  # Không thể nhỏ hơn 5mm
+                min_width_per_col = 5
+            # Đặt lại tất cả cột về min_width
+            col_widths = [min_width_per_col] * len(df.columns)
+        elif total_width > usable_width:
+            # Scale xuống nhưng đảm bảo không nhỏ hơn min_width_per_col
             scale_factor = usable_width / total_width
-            col_widths = [width * scale_factor for width in col_widths]
+            col_widths = [max(min_width_per_col, width * scale_factor) for width in col_widths]
+            # Điều chỉnh lại nếu vẫn vượt (do đảm bảo min_width)
+            new_total = sum(col_widths)
+            if new_total > usable_width:
+                # Scale lại lần nữa
+                scale_factor = usable_width / new_total
+                col_widths = [width * scale_factor for width in col_widths]
+        
+        # Đảm bảo mỗi cột >= min_width cuối cùng (trước khi vẽ)
+        for idx in range(len(col_widths)):
+            if col_widths[idx] < min_width_per_col:
+                col_widths[idx] = min_width_per_col
+        
+        # Tính lại tổng độ rộng sau khi đảm bảo min_width
+        final_total = sum(col_widths)
+        if final_total > usable_width:
+            # Scale lại toàn bộ để vừa trang, nhưng chỉ scale một lần
+            scale_factor = usable_width / final_total
+            for idx in range(len(col_widths)):
+                col_widths[idx] = col_widths[idx] * scale_factor
+            
+            # Kiểm tra lại sau scale - nếu vẫn có cột < min_width (do scale quá nhiều)
+            # thì chỉ đặt lại các cột quá nhỏ thành min_width, chấp nhận có thể vượt trang một chút
+            for idx in range(len(col_widths)):
+                if col_widths[idx] < min_width_per_col:
+                    col_widths[idx] = min_width_per_col
         
         # Tạo tiêu đề cột
         _set_font_safe(pdf, 'B', 10)
@@ -628,19 +682,35 @@ def dataframe_to_pdf_fpdf(df, title, filename):
                 row_start_y = pdf.get_y()
             
             # Vẽ từng ô trong hàng hiện tại
+            # Đảm bảo tất cả col_widths >= min_width_per_col trước khi tính cell_x
+            min_w = pdf.get_string_width('W') + 6
+            min_safe_width = max(min_width_per_col, min_w, 9)  # Tối thiểu 9mm
+            
+            # Fix tất cả col_widths trước, đảm bảo không update trong vòng lặp
+            for idx in range(len(df.columns)):
+                if col_widths[idx] < min_safe_width:
+                    col_widths[idx] = min_safe_width
+            
             for j, col_name in enumerate(df.columns):
                 cell_x = row_start_x + sum(col_widths[:j])
                 content = str(df.iloc[i, j])
                 
-                # Cắt ngắn nội dung nếu quá dài
-                if len(content) > 100:
-                    content = content[:97] + "..."
+                # col_widths[j] đã được đảm bảo >= min_safe_width ở trên
+                # Cắt ngắn nội dung nếu quá dài để tránh vấn đề hiển thị
+                if len(content) > 200:
+                    content = content[:197] + "..."
                 
                 # Tính số dòng cần thiết cho nội dung này
                 content_width = pdf.get_string_width(content)
-                if content_width > col_widths[j] - 4:  # Trừ đi padding
+                available_width = col_widths[j] - 6  # Trừ padding và border
+                
+                # Đảm bảo available_width luôn > 0 (col_widths[j] đã >= 9mm)
+                if available_width <= 0:
+                    available_width = 3  # Tối thiểu 3mm (do col_widths[j] >= 9mm nên available >= 3)
+                
+                if content_width > available_width:
                     # Ước tính số dòng cần thiết
-                    num_lines = int(content_width / (col_widths[j] - 4)) + 1
+                    num_lines = max(1, int(content_width / available_width) + 1)
                     # Tính chiều cao cần thiết
                     cell_height = max(row_height, num_lines * 5)  # 5mm cho mỗi dòng
                 else:
@@ -649,9 +719,21 @@ def dataframe_to_pdf_fpdf(df, title, filename):
                 # Cập nhật chiều cao tối đa cho dòng hiện tại
                 max_height = max(max_height, cell_height)
                 
-                # Vẽ ô với nội dung
+                # Vẽ ô với nội dung - sử dụng col_widths[j] đã được đảm bảo
                 pdf.set_xy(cell_x, row_start_y)
-                pdf.multi_cell(col_widths[j], cell_height, content, 1, 'L')
+                # col_widths[j] đã được đảm bảo >= 9mm ở trên
+                final_width = col_widths[j]
+                try:
+                    pdf.multi_cell(final_width, cell_height, content, 1, 'L')
+                except Exception as e:
+                    # Nếu vẫn lỗi, thử với độ rộng lớn hơn
+                    final_width = max(final_width, 10)
+                    try:
+                        pdf.multi_cell(final_width, cell_height, content[:50] if len(content) > 50 else content, 1, 'L')
+                    except:
+                        # Last resort: chỉ render ký tự ASCII
+                        ascii_content = ''.join(c for c in content if ord(c) < 128)[:50]
+                        pdf.multi_cell(final_width, cell_height, ascii_content or "N/A", 1, 'L')
             
             # Di chuyển đến dòng tiếp theo
             pdf.set_y(row_start_y + max_height)
