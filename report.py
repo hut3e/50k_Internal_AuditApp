@@ -18,7 +18,10 @@ from docx.oxml import parse_xml
 from fpdf import FPDF
 import urllib.request
 # Thêm thư viện để hỗ trợ Unicode
-import pkg_resources
+try:
+    import importlib.metadata as importlib_metadata
+except Exception:
+    importlib_metadata = None
 
 from database_helper import get_supabase_client
 
@@ -133,15 +136,26 @@ except ImportError:
 # Hàm kiểm tra cài đặt và phiên bản của FPDF
 def check_fpdf_installed():
     try:
-        # Kiểm tra phiên bản của fpdf
-        fpdf_pkg = pkg_resources.get_distribution("fpdf")
-        st.success(f"FPDF đã được cài đặt, phiên bản: {fpdf_pkg.version}")
+        # Thử import trực tiếp
+        import fpdf  # type: ignore
+        version = None
+        if importlib_metadata is not None:
+            try:
+                version = importlib_metadata.version("fpdf2")
+            except Exception:
+                try:
+                    version = importlib_metadata.version("fpdf")
+                except Exception:
+                    version = getattr(fpdf, "__version__", None)
+        else:
+            version = getattr(fpdf, "__version__", None)
+        if version:
+            st.success(f"FPDF đã được cài đặt, phiên bản: {version}")
+        else:
+            st.info("FPDF đã được cài đặt.")
         return True
-    except pkg_resources.DistributionNotFound:
+    except Exception:
         st.error("FPDF chưa được cài đặt. Hãy cài đặt bằng lệnh: pip install fpdf2")
-        return False
-    except Exception as e:
-        st.error(f"Lỗi khi kiểm tra FPDF: {str(e)}")
         return False
 
 # Chuẩn bị font tiếng Việt
