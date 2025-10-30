@@ -3783,7 +3783,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                 from database_helper import check_answer_correctness as db_check_answer
                                 is_correct = db_check_answer(user_ans, q)
                             except ImportError:
-                            is_correct = check_answer_correctness(user_ans, q)
+                                is_correct = check_answer_correctness(user_ans, q)
                             
                             if is_correct:
                                 correct_count += 1
