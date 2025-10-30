@@ -4188,14 +4188,14 @@ def view_statistics():
                 # Fallback: thử lấy từng học viên nếu lỗi
                 st.info("Đang thử cách khác...")
                 submissions = []
-            for student in students:
-                try:
+                for student in students:
+                    try:
                         try:
                             from database_helper import get_user_submissions as db_get_user_submissions
                             student_submissions = db_get_user_submissions(student.get("email", ""))
                         except ImportError:
-                    student_submissions = get_user_submissions(student.get("email", ""))
-                        
+                            student_submissions = get_user_submissions(student.get("email", ""))
+
                         if student_submissions:
                             # Validate responses cho mỗi submission
                             for sub in student_submissions:
@@ -4204,7 +4204,7 @@ def view_statistics():
                                         sub["responses"] = json.loads(sub["responses"])
                                     except:
                                         sub["responses"] = {}
-                    submissions.extend(student_submissions)
+                            submissions.extend(student_submissions)
                     except Exception as ex:
                         print(f"Lỗi khi lấy dữ liệu của học viên {student.get('email', '')}: {str(ex)}")
         
