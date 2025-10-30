@@ -3830,16 +3830,18 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                         with col1:
                             # Word
                             try:
-                            docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
+                                docx_buffer = dataframe_to_docx(df_student_report, title, f"bao_cao_{student_name}.docx")
                                 if docx_buffer is None:
                                     st.error("Không thể tạo báo cáo DOCX: Buffer rỗng")
                                 else:
-                            st.markdown(
-                                get_download_link_docx(docx_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}.docx", 
-                                                    "Tải xuống báo cáo DOCX"), 
-                                unsafe_allow_html=True
-                            )
+                                    st.markdown(
+                                        get_download_link_docx(
+                                            docx_buffer,
+                                            f"bao_cao_{student_name.replace(' ', '_')}.docx",
+                                            "Tải xuống báo cáo DOCX"
+                                        ),
+                                        unsafe_allow_html=True
+                                    )
                             except Exception as e:
                                 st.error(f"Lỗi khi tạo báo cáo DOCX: {str(e)}")
                         
@@ -3849,13 +3851,13 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                                 try:
                                     pdf_buffer = dataframe_to_pdf_reportlab(df_student_report, title, f"bao_cao_{student_name}.pdf")
                                 except:
-                            pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
+                                    pdf_buffer = dataframe_to_pdf_fpdf(df_student_report, title, f"bao_cao_{student_name}.pdf")
                                 if pdf_buffer is not None:
                                     get_download_link_pdf(
-                                        pdf_buffer, 
-                                                    f"bao_cao_{student_name.replace(' ', '_')}.pdf", 
+                                        pdf_buffer,
+                                        f"bao_cao_{student_name.replace(' ', '_')}.pdf",
                                         "📥 Tải xuống báo cáo PDF"
-                            )
+                                    )
                             except Exception as e:
                                 st.error(f"Lỗi khi tạo báo cáo PDF: {str(e)}")
                         
@@ -3869,7 +3871,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                             excel_dfs = []
                             excel_sheet_names = []
                             
-                        for idx, submission in enumerate(student_submissions):
+                            for idx, submission in enumerate(student_submissions):
                                 # Tạo DataFrame cho lần làm này
                                 submission_data = []
                                 
