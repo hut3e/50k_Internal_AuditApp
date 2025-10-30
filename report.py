@@ -378,11 +378,11 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
     try:
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
         from openpyxl.utils import get_column_letter
-        
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
             used_names = set()
-        for df, sheet_name in zip(dataframes, sheet_names):
+            for df, sheet_name in zip(dataframes, sheet_names):
                 # Làm sạch sheet name để tránh lỗi ký tự không hợp lệ
                 base_name = sanitize_sheet_name(sheet_name)
                 clean_sheet_name = base_name
@@ -393,35 +393,35 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                     clean_sheet_name = sanitize_sheet_name(candidate)
                     suffix += 1
                 used_names.add(clean_sheet_name)
-                
+
                 # Ghi DataFrame vào Excel
                 df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
-                
+
                 # Lấy worksheet để format
                 worksheet = writer.sheets[clean_sheet_name]
-                
+
                 # Format header
                 header_fill = PatternFill(start_color="E9E9E9", end_color="E9E9E9", fill_type="solid")
                 header_font = Font(bold=True, size=11)
                 header_alignment = Alignment(horizontal="center", vertical="center")
-                
+
                 for cell in worksheet[1]:
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = header_alignment
-                
+
                 # Tự động điều chỉnh độ rộng cột theo nội dung (giới hạn theo A4)
                 # A4 width: ~210mm, với margin ~10mm mỗi bên = ~190mm usable
                 # Approx: 1 character width = 0.1 inch = 2.54mm
                 # Max columns on A4 portrait: ~75 characters total width
                 max_width_chars = 75  # Giới hạn cho A4 portrait
                 total_char_width = 0
-                
+
                 for idx, column in enumerate(worksheet.columns, 1):
                     column_letter = get_column_letter(idx)
                     max_length = 0
                     column_cells = list(column)
-                    
+
                     # Tìm độ dài tối đa trong cột
                     for cell in column_cells:
                         try:
@@ -433,12 +433,12 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                                 max_length = max(max_length, len(cell_str))
                         except:
                             pass
-                    
+
                     # Điều chỉnh độ rộng (min 10, max 50 để fit A4)
                     adjusted_width = min(max(max_length + 2, 10), 50)
                     worksheet.column_dimensions[column_letter].width = adjusted_width
                     total_char_width += adjusted_width
-                
+
                 # Nếu tổng độ rộng vượt quá giới hạn, scale lại
                 if total_char_width > max_width_chars:
                     scale_factor = max_width_chars / total_char_width
@@ -446,22 +446,22 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                         column_letter = get_column_letter(idx)
                         current_width = worksheet.column_dimensions[column_letter].width
                         worksheet.column_dimensions[column_letter].width = max(current_width * scale_factor, 8)
-                
+
                 # Điều chỉnh chiều cao hàng header
                 worksheet.row_dimensions[1].height = 25
-                
+
                 # Thêm phần tổng hợp điểm nếu cần và có dữ liệu questions/submissions
                 if include_summary and questions and submissions and "Tất cả bài nộp" in sheet_name:
                     # Tính tổng hợp điểm trắc nghiệm và tự luận
                     max_multiple_choice = sum([q.get("score", 0) for q in questions if q.get("type") in ["Checkbox", "Combobox"]])
                     max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
                     max_total = sum([q.get("score", 0) for q in questions])
-                    
+
                     total_multiple_choice = 0
                     total_essay = 0
                     total_score = 0
                     correct_answers = {}
-                    
+
                     # Tính từ các submissions
                     try:
                         for s in submissions:
@@ -473,27 +473,27 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                                     responses = {}
                             if not isinstance(responses, dict):
                                 responses = {}
-                            
+
                             total_score += s.get("score", 0)
-                            
+
                             for q in questions:
                                 q_id = str(q.get("id", ""))
                                 q_type = q.get("type", "")
                                 user_ans = responses.get(q_id, [])
                                 if not isinstance(user_ans, list):
                                     user_ans = [user_ans] if user_ans is not None else []
-                                
+
                                 try:
                                     from database_helper import check_answer_correctness as db_check_answer
                                     is_correct = db_check_answer(user_ans, q)
                                 except ImportError:
                                     is_correct = check_answer_correctness(user_ans, q)
-                                
+
                                 if is_correct:
                                     if q_id not in correct_answers:
                                         correct_answers[q_id] = 0
                                     correct_answers[q_id] += 1
-                                    
+
                                     points = q.get("score", 0)
                                     if q_type in ["Checkbox", "Combobox"]:
                                         total_multiple_choice += points
@@ -501,12 +501,12 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                                         total_essay += points
                     except Exception as calc_error:
                         print(f"Lỗi khi tính tổng hợp điểm trong Excel: {calc_error}")
-                    
+
                     # Thêm dòng trống
                     next_row = len(df) + 3
                     worksheet.cell(row=next_row, column=1).value = "TỔNG KẾT"
                     worksheet.cell(row=next_row, column=1).font = Font(bold=True, size=12)
-                    
+
                     # Thêm bảng tổng hợp
                     summary_data = [
                         ["Chỉ tiêu", "Giá trị"],
@@ -516,7 +516,7 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                         ["Tỷ lệ đúng trắc nghiệm", f"{(total_multiple_choice / (max_multiple_choice * len(submissions)) * 100):.1f}%" if max_multiple_choice > 0 and submissions else "0%"],
                         ["Tỷ lệ đúng tự luận", f"{(total_essay / (max_essay * len(submissions)) * 100):.1f}%" if max_essay > 0 and submissions else "0%"],
                     ]
-                    
+
                     start_row = next_row + 1
                     for i, row_data in enumerate(summary_data):
                         for j, value in enumerate(row_data, 1):
@@ -527,10 +527,10 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                                 cell.alignment = header_alignment
                             else:
                                 cell.alignment = Alignment(horizontal="left", vertical="center")
-                                
+
                                 if j == 1:  # First column (labels)
                                     cell.font = Font(bold=True)
-                                
+
                                 # Border
                                 thin_border = Border(
                                     left=Side(style='thin'),
@@ -539,34 +539,34 @@ def export_to_excel(dataframes, sheet_names, filename, include_summary=True, que
                                     bottom=Side(style='thin')
                                 )
                                 cell.border = thin_border
-                    
+
                     # Điều chỉnh độ rộng cột cho bảng tổng hợp
                     worksheet.column_dimensions[get_column_letter(1)].width = max(20, worksheet.column_dimensions[get_column_letter(1)].width)
                     worksheet.column_dimensions[get_column_letter(2)].width = max(20, worksheet.column_dimensions[get_column_letter(2)].width)
-                
+
                 # Đặt orientation và page size cho A4
                 worksheet.page_setup.orientation = 'portrait'
                 worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
-        
+
         # Đảm bảo dữ liệu được ghi
         output.flush()
         output.seek(0)
-        
+
         # Lấy data
-    data = output.getvalue()
+        data = output.getvalue()
         if not data or len(data) < 100:
             # Thử read nếu getvalue không có
             output.seek(0)
             data = output.read()
             output.seek(0)
-        
+
         # Kiểm tra signature Excel (XLSX là ZIP format)
         if not data or len(data) < 100:
             raise ValueError(f"Excel buffer is empty or too small (length: {len(data) if data else 0})")
-        
+
         if data[:2] != b'PK':
             raise ValueError("Excel buffer does not contain valid XLSX file (missing ZIP signature)")
-        
+
         # Sử dụng st.download_button thay vì data URI
         output.seek(0)
         st.download_button(
