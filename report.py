@@ -3080,9 +3080,9 @@ def display_question_tab(submissions=None, questions=None):
                     is_correct = check_answer_correctness(user_ans, q)
                 
                 if is_correct:
-                correct_count += 1
-            else:
-                wrong_count += 1
+                    correct_count += 1
+                else:
+                    wrong_count += 1
         
         question_stats[q_id] = {
             "question": q.get("question", ""),
