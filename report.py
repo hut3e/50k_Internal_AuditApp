@@ -2923,7 +2923,7 @@ def display_student_tab(submissions=None, students=None, questions=None, max_pos
                             from database_helper import check_answer_correctness as db_check_answer
                             is_correct = db_check_answer(user_ans, q)
                         except ImportError:
-                        is_correct = check_answer_correctness(user_ans, q)
+                            is_correct = check_answer_correctness(user_ans, q)
                         if is_correct:
                             total_correct += 1
                         
