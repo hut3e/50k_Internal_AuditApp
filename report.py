@@ -3592,7 +3592,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
                     except:
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_students_list, "Báo cáo danh sách học viên", "bao_cao_danh_sach_hoc_vien.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_danh_sach_hoc_vien.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
@@ -3618,7 +3618,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
                     except:
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_class_stats, "Báo cáo thống kê theo lớp", "bao_cao_thong_ke_lop.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_lop.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
