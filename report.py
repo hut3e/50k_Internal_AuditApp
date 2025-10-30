@@ -47,12 +47,12 @@ except ImportError:
                 if isinstance(answers, str):
                     try:
                         answers = json.loads(answers)
-            except:
+                    except:
                         answers = [answers]
                 if isinstance(correct, str):
-                try:
+                    try:
                         correct = json.loads(correct)
-                except:
+                    except:
                         try:
                             correct = [int(x.strip()) for x in correct.split(",")]
                         except:
