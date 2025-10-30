@@ -133,6 +133,25 @@ except ImportError:
     if 'streamlit' in sys.modules:
         st.warning("Module reportlab không được cài đặt. Tính năng xuất PDF sẽ bị hạn chế.")
 
+# ReportLab font registration for Vietnamese
+def get_reportlab_font_name():
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        candidates = [
+            os.path.join(base_dir, 'assets', 'fonts', 'DejaVuSans.ttf'),
+            os.path.join(base_dir, 'assets', 'fonts', 'DejaVuSansCondensed.ttf'),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                try:
+                    pdfmetrics.registerFont(TTFont('DejaVuSans', path))
+                    return 'DejaVuSans'
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return 'Helvetica'
+
 # Hàm kiểm tra cài đặt và phiên bản của FPDF
 def check_fpdf_installed():
     try:
@@ -941,13 +960,15 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         
         # Styles
         styles = getSampleStyleSheet()
+        font_name = get_reportlab_font_name()
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=16,
             textColor=colors.HexColor('#000000'),
             alignment=1,  # Center
-            spaceAfter=12
+            spaceAfter=12,
+            fontName=font_name
         )
         
         data_style = ParagraphStyle(
@@ -955,7 +976,8 @@ def dataframe_to_pdf_reportlab(df, title, filename):
             parent=styles['Normal'],
             fontSize=8,
             textColor=colors.HexColor('#000000'),
-            leading=10
+            leading=10,
+            fontName=font_name
         )
         
         # Title
@@ -1016,13 +1038,13 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
-        # Style table - tối ưu cho Paragraph objects
+        # Style table - tối ưu cho Paragraph objects và font Unicode
         table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
@@ -1032,11 +1054,12 @@ def dataframe_to_pdf_reportlab(df, title, filename):
             # Body
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
-            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),  # Left align cho Paragraph
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (-1, -1), font_name),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align để tránh overlap
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
             ('LEFTPADDING', (0, 1), (-1, -1), 4),
             ('RIGHTPADDING', (0, 1), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
