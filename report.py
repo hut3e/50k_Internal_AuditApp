@@ -4338,7 +4338,7 @@ def view_statistics():
                         from database_helper import check_answer_correctness as db_check_answer
                         is_correct = db_check_answer(user_ans, q)
                     except ImportError:
-                    is_correct = check_answer_correctness(user_ans, q)
+                        is_correct = check_answer_correctness(user_ans, q)
                     
                     # Thêm thông tin câu hỏi
                     submission_data[f"Câu {q_id}: {q.get('question', '')}"] = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
