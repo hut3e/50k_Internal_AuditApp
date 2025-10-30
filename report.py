@@ -607,21 +607,21 @@ def dataframe_to_docx(df, title, filename):
         if df is None or not hasattr(df, 'columns') or len(df.columns) == 0:
             doc.add_paragraph("Không có dữ liệu để hiển thị.")
         else:
-        # Tạo bảng
-        # Thêm một hàng cho tiêu đề cột
-        table = doc.add_table(rows=1, cols=len(df.columns), style='Table Grid')
-        
-        # Thêm tiêu đề cột
-        header_cells = table.rows[0].cells
-        for i, col_name in enumerate(df.columns):
-            header_cells[i].text = str(col_name)
-            # Đặt kiểu cho tiêu đề
-            for paragraph in header_cells[i].paragraphs:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = paragraph.runs[0] if paragraph.runs else paragraph.add_run(str(col_name))
-                run.bold = True
-        
-        # Thêm dữ liệu
+            # Tạo bảng
+            # Thêm một hàng cho tiêu đề cột
+            table = doc.add_table(rows=1, cols=len(df.columns), style='Table Grid')
+            
+            # Thêm tiêu đề cột
+            header_cells = table.rows[0].cells
+            for i, col_name in enumerate(df.columns):
+                header_cells[i].text = str(col_name)
+                # Đặt kiểu cho tiêu đề
+                for paragraph in header_cells[i].paragraphs:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = paragraph.runs[0] if paragraph.runs else paragraph.add_run(str(col_name))
+                    run.bold = True
+            
+            # Thêm dữ liệu
             if len(df) == 0:
                 # Nếu không có dòng dữ liệu, thêm một dòng thông báo
                 row_cells = table.add_row().cells
@@ -630,13 +630,13 @@ def dataframe_to_docx(df, title, filename):
                     for paragraph in row_cells[0].paragraphs:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             else:
-        for _, row in df.iterrows():
-            row_cells = table.add_row().cells
-            for i, value in enumerate(row):
-                row_cells[i].text = str(value)
-                # Căn giữa cho các ô
-                for paragraph in row_cells[i].paragraphs:
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for _, row in df.iterrows():
+                    row_cells = table.add_row().cells
+                    for i, value in enumerate(row):
+                        row_cells[i].text = str(value)
+                        # Căn giữa cho các ô
+                        for paragraph in row_cells[i].paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Thêm chân trang
         doc.add_paragraph()
@@ -660,8 +660,8 @@ def dataframe_to_docx(df, title, filename):
             temp_buffer.close()
             
             # Đảm bảo buffer ở đầu
-        buffer.seek(0)
-        
+            buffer.seek(0)
+            
             # Kiểm tra nội dung
             content = buffer.getvalue()
             if not content or len(content) < 100:
@@ -673,7 +673,7 @@ def dataframe_to_docx(df, title, filename):
             
             # Đảm bảo buffer ở đầu để sẵn sàng đọc
             buffer.seek(0)
-        return buffer
+            return buffer
         except Exception as save_error:
             print(f"Lỗi khi lưu DOCX vào buffer: {save_error}")
             import traceback
@@ -959,32 +959,50 @@ def dataframe_to_pdf_reportlab(df, title, filename):
         if df is None or not hasattr(df, 'columns') or len(df.columns) == 0:
             table_data = [["Không có dữ liệu"]]
         else:
-            # Header
-            header = [str(col) for col in df.columns]
+            # Header - sử dụng Paragraph để tránh overlap
+            header = [Paragraph(str(col), data_style) for col in df.columns]
             table_data.append(header)
             
             # Data rows (limit để tránh file quá lớn)
             max_rows = min(500, len(df))
             if max_rows == 0:
-                table_data.append(["Không có dữ liệu"] + [""] * (len(df.columns) - 1))
+                empty_row = [Paragraph("Không có dữ liệu", data_style)] + [Paragraph("", data_style)] * (len(df.columns) - 1)
+                table_data.append(empty_row)
             else:
                 for i in range(max_rows):
-                    row = [str(df.iloc[i, j])[:100] if len(str(df.iloc[i, j])) > 100 else str(df.iloc[i, j]) 
-                           for j in range(len(df.columns))]
+                    row = []
+                    for j in range(len(df.columns)):
+                        cell_value = str(df.iloc[i, j])
+                        # Giới hạn độ dài để tránh overflow
+                        if len(cell_value) > 100:
+                            cell_value = cell_value[:97] + "..."
+                        row.append(Paragraph(cell_value, data_style))
                     table_data.append(row)
         
-        # Create table
-        # Tính độ rộng cột an toàn cho A4
+        # Create table với độ rộng cột cố định để tránh overlap
         num_cols = len(df.columns) if df is not None and hasattr(df, 'columns') and len(df.columns) > 0 else 1
-        col_widths = [50*mm] * num_cols  # Default width
-        # Adjust based on content (simplified)
-        if num_cols > 0:
-            avg_col_width = (A4[0] - 20*mm) / num_cols
-            col_widths = [avg_col_width] * num_cols
+        
+        # Tính toán độ rộng cột cố định cho A4 (trừ margin)
+        available_width = A4[0] - 20*mm  # Trừ margin trái phải
+        col_widths = []
+        
+        if num_cols == 1:
+            col_widths = [available_width]
+        elif num_cols == 2:
+            col_widths = [available_width * 0.6, available_width * 0.4]
+        elif num_cols == 3:
+            col_widths = [available_width * 0.4, available_width * 0.3, available_width * 0.3]
+        elif num_cols == 4:
+            col_widths = [available_width * 0.3, available_width * 0.25, available_width * 0.25, available_width * 0.2]
+        elif num_cols == 5:
+            col_widths = [available_width * 0.25, available_width * 0.2, available_width * 0.2, available_width * 0.2, available_width * 0.15]
+        else:
+            # Nhiều hơn 5 cột - chia đều
+            col_widths = [available_width / num_cols] * num_cols
         
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
-        # Style table
+        # Style table - tối ưu cho Paragraph objects
         table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
@@ -992,17 +1010,23 @@ def dataframe_to_pdf_reportlab(df, title, filename):
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, 0), 4),
+            ('RIGHTPADDING', (0, 0), (-1, 0), 4),
             
             # Body
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
-            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),  # Left align cho Paragraph
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align để tránh overlap
+            ('LEFTPADDING', (0, 1), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
         ]))
         
@@ -1495,8 +1519,36 @@ def create_student_report_pdf_reportlab(student_name, student_email, student_cla
         multiple_choice_score = 0
         essay_score = 0
         
-        # Tạo bảng chi tiết
-        detail_data = [["Câu hỏi", "Đáp án học viên", "Đáp án đúng", "Kết quả", "Điểm"]]
+        # Tạo bảng chi tiết với Paragraph objects để tránh overlap
+        detail_data = []
+        
+        # Header với Paragraph objects
+        header_style = ParagraphStyle(
+            'HeaderStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#000000'),
+            alignment=1,  # Center
+            fontName='Helvetica-Bold'
+        )
+        
+        detail_data.append([
+            Paragraph("Câu hỏi", header_style),
+            Paragraph("Đáp án học viên", header_style),
+            Paragraph("Đáp án đúng", header_style),
+            Paragraph("Kết quả", header_style),
+            Paragraph("Điểm", header_style)
+        ])
+        
+        # Data style cho nội dung
+        data_style = ParagraphStyle(
+            'DataStyle',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#000000'),
+            leading=10,
+            fontName='Helvetica'
+        )
         
         for q in questions:
             q_id = str(q.get("id", ""))
@@ -1526,30 +1578,38 @@ def create_student_report_pdf_reportlab(student_name, student_email, student_cla
             
             calculated_total_score += points
             
-            # Chuẩn bị dữ liệu cho bảng
-            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"[:80]  # Giới hạn độ dài
+            # Chuẩn bị dữ liệu cho bảng với Paragraph objects
+            question_text = f"Câu {q.get('id', '')}: {q.get('question', '')}"
             
             if q_type == "Essay":
                 user_answer_text = user_ans[0] if user_ans else "Không trả lời"
                 correct_answer_text = "Câu hỏi tự luận"
                 result = "Đã trả lời" if is_correct else "Không trả lời"
             else:
-                user_answer_text = ", ".join([str(a) for a in user_ans])[:50] if user_ans else "Không trả lời"
+                user_answer_text = ", ".join([str(a) for a in user_ans]) if user_ans else "Không trả lời"
                 q_correct = q.get("correct", [])
                 q_answers = q.get("answers", [])
                 try:
                     expected = [q_answers[i - 1] for i in q_correct] if q_correct else []
-                    correct_answer_text = ", ".join([str(a) for a in expected])[:50] if expected else "Không có đáp án"
+                    correct_answer_text = ", ".join([str(a) for a in expected]) if expected else "Không có đáp án"
                 except:
                     correct_answer_text = "Lỗi đáp án"
                 result = "Đúng" if is_correct else "Sai"
             
-            detail_data.append([question_text, user_answer_text[:50], correct_answer_text[:50], result, str(points)])
+            # Tạo Paragraph objects cho mỗi cell
+            detail_data.append([
+                Paragraph(question_text, data_style),
+                Paragraph(user_answer_text, data_style),
+                Paragraph(correct_answer_text, data_style),
+                Paragraph(result, data_style),
+                Paragraph(str(points), data_style)
+            ])
         
-        # Tạo bảng với độ rộng cột hợp lý cho A4
+        # Tạo bảng với độ rộng cột cố định để tránh overlap
         col_widths = [60*mm, 45*mm, 45*mm, 20*mm, 20*mm]
         detail_table = Table(detail_data, colWidths=col_widths, repeatRows=1)
         detail_table.setStyle(TableStyle([
+            # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -1557,14 +1617,21 @@ def create_student_report_pdf_reportlab(student_name, student_email, student_cla
             ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, 0), 4),
+            ('RIGHTPADDING', (0, 0), (-1, 0), 4),
+            
+            # Body - tối ưu cho Paragraph objects
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
-            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-            ('ALIGN', (3, 1), (4, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),  # Left align cho Paragraph
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align để tránh overlap
+            ('LEFTPADDING', (0, 1), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
         ]))
         story.append(detail_table)
@@ -1575,34 +1642,85 @@ def create_student_report_pdf_reportlab(student_name, student_email, student_cla
         max_essay = sum([q.get("score", 0) for q in questions if q.get("type") == "Essay"])
         
         story.append(Paragraph("<b>Tổng kết</b>", styles['Heading2']))
-        summary_data = [
-            ["Chỉ tiêu", "Giá trị"],
-            ["Số câu đúng", f"{total_correct}/{len(questions)}"],
-            ["Điểm trắc nghiệm", f"{multiple_choice_score}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0"],
-            ["Điểm tự luận", f"{essay_score}/{max_essay}" if max_essay > 0 else "0/0"],
-            ["Tổng điểm", f"{calculated_total_score}/{max_possible}"],
-            ["Tỷ lệ đúng", f"{(total_correct/len(questions)*100):.1f}%" if len(questions) > 0 else "0%"],
-            ["Tỷ lệ điểm", f"{(calculated_total_score/max_possible*100):.1f}%" if max_possible > 0 else "0%"],
-        ]
+        
+        # Tạo bảng tổng kết với Paragraph objects
+        summary_data = []
+        
+        # Header
+        summary_header_style = ParagraphStyle(
+            'SummaryHeaderStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#000000'),
+            alignment=1,  # Center
+            fontName='Helvetica-Bold'
+        )
+        
+        summary_data.append([
+            Paragraph("Chỉ tiêu", summary_header_style),
+            Paragraph("Giá trị", summary_header_style)
+        ])
+        
+        # Data rows với Paragraph objects
+        summary_data_style = ParagraphStyle(
+            'SummaryDataStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#000000'),
+            leading=12,
+            fontName='Helvetica'
+        )
+        
+        summary_data.append([
+            Paragraph("Số câu đúng", summary_data_style),
+            Paragraph(f"{total_correct}/{len(questions)}", summary_data_style)
+        ])
+        summary_data.append([
+            Paragraph("Điểm trắc nghiệm", summary_data_style),
+            Paragraph(f"{multiple_choice_score}/{max_multiple_choice}" if max_multiple_choice > 0 else "0/0", summary_data_style)
+        ])
+        summary_data.append([
+            Paragraph("Điểm tự luận", summary_data_style),
+            Paragraph(f"{essay_score}/{max_essay}" if max_essay > 0 else "0/0", summary_data_style)
+        ])
+        summary_data.append([
+            Paragraph("Tổng điểm", summary_data_style),
+            Paragraph(f"{calculated_total_score}/{max_possible}", summary_data_style)
+        ])
+        summary_data.append([
+            Paragraph("Tỷ lệ đúng", summary_data_style),
+            Paragraph(f"{(total_correct/len(questions)*100):.1f}%" if len(questions) > 0 else "0%", summary_data_style)
+        ])
+        summary_data.append([
+            Paragraph("Tỷ lệ điểm", summary_data_style),
+            Paragraph(f"{(calculated_total_score/max_possible*100):.1f}%" if max_possible > 0 else "0%", summary_data_style)
+        ])
         
         summary_table = Table(summary_data, colWidths=[80*mm, 110*mm])
         summary_table.setStyle(TableStyle([
+            # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E9E9E9')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#000000')),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, 0), 4),
+            ('RIGHTPADDING', (0, 0), (-1, 0), 4),
+            
+            # Body - tối ưu cho Paragraph objects
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#000000')),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),  # Left align cho Paragraph
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align để tránh overlap
+            ('LEFTPADDING', (0, 1), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F9F9F9')]),
         ]))
         story.append(summary_table)
