@@ -3566,7 +3566,7 @@ def display_export_tab(df_all_submissions=None, df_questions=None, df_students_l
                     try:
                         pdf_buffer = dataframe_to_pdf_reportlab(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
                     except:
-                    pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
+                        pdf_buffer = dataframe_to_pdf_fpdf(df_questions, "Báo cáo thống kê câu hỏi", "bao_cao_thong_ke_cau_hoi.pdf")
                     if pdf_buffer is not None:
                         get_download_link_pdf(pdf_buffer, "bao_cao_thong_ke_cau_hoi.pdf", "📥 Tải xuống báo cáo (PDF)")
                 except Exception as e:
