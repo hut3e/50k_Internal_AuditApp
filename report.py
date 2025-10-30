@@ -679,31 +679,32 @@ def dataframe_to_docx(df, title, filename):
         # Lưu tệp vào buffer - đảm bảo cách xử lý đúng
         buffer = io.BytesIO()
         try:
-            # Đảm bảo document được lưu hoàn toàn
-            # Tạo buffer mới để lưu
-            temp_buffer = io.BytesIO()
-            doc.save(temp_buffer)
-            
-            # Đảm bảo dữ liệu được ghi hoàn toàn
-            temp_buffer.flush()
-            temp_buffer.seek(0)
-            
-            # Copy nội dung sang buffer chính
-            buffer.write(temp_buffer.getvalue())
-            temp_buffer.close()
-            
+            # Lưu qua file tạm để chắc chắn ghi đủ rồi mới đọc vào buffer
+            import tempfile, os
+            tmp_file = None
+            try:
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.docx')
+                tmp_file = tmp.name
+                tmp.close()
+                doc.save(tmp_file)
+                with open(tmp_file, 'rb') as f:
+                    content = f.read()
+                buffer.write(content)
+            finally:
+                if tmp_file and os.path.exists(tmp_file):
+                    try:
+                        os.remove(tmp_file)
+                    except:
+                        pass
             # Đảm bảo buffer ở đầu
             buffer.seek(0)
-            
             # Kiểm tra nội dung
             content = buffer.getvalue()
             if not content or len(content) < 100:
                 raise ValueError(f"DOCX buffer is empty or too small (length: {len(content) if content else 0})")
-            
             # Kiểm tra signature DOCX (PK = ZIP format)
             if content[:2] != b'PK':
                 raise ValueError("DOCX buffer does not contain valid DOCX file (missing ZIP signature)")
-            
             # Đảm bảo buffer ở đầu để sẵn sàng đọc
             buffer.seek(0)
             return buffer
